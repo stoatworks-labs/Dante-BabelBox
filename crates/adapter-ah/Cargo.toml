@@ -1,0 +1,11 @@
+[package]
+name = "preamp-bridge-adapter-ah"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+preamp-bridge-core.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+tracing.workspace = true

@@ -1,0 +1,27 @@
+[package]
+name = "preamp-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "preamp-bridge"
+path = "src/main.rs"
+
+[dependencies]
+preamp-bridge-core.workspace = true
+preamp-bridge-discovery.workspace = true
+preamp-bridge-adapter-osc.workspace = true
+preamp-bridge-adapter-ah.workspace = true
+preamp-bridge-adapter-yamaha.workspace = true
+tokio.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+toml.workspace = true
+notify = "6"
+
+[dev-dependencies]
+rosc = "0.10"

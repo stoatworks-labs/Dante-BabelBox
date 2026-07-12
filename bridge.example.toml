@@ -1,0 +1,54 @@
+# Example bridge configuration. Copy to bridge.toml and edit for your rig.
+#
+# Implemented device kinds today:
+#   "osc-x32"    Behringer X32/Wing-family sharing the X32 OSC dialect
+#                (covers X32 and Midas M32/HD96)
+#   "osc-wing"   Behringer Wing's own OSC dialect (console's 8 built-in
+#                LCL preamps only for now - see adapter-osc's wing.rs)
+#   "ah-tcp"     Allen & Heath AHM-series Dante/AES67 processors
+#   "dlive-tcp"  Allen & Heath dLive consoles/MixRacks (physical preamp
+#                "socket" addressing, channel = socket number 1-128)
+#   "yamaha-dm3" Yamaha DM3/DM3S (official OSC spec; channel = Local
+#                Input Num 1-16; gain is coarse integer dB, 0-64 only)
+#
+# "ah-midi" (Qu/SQ) and "yamaha" (CL/QL/DM7, Rio/Tio) are not implemented
+# yet - see the project task list for why.
+
+[[device]]
+id = "ahm-rack"
+kind = "ah-tcp"
+address = "10.0.0.10"
+port = 51325
+
+[[device]]
+id = "dlive-mixrack"
+kind = "dlive-tcp"
+address = "10.0.0.15"
+port = 51325
+
+[[device]]
+id = "x32-monitors"
+kind = "osc-x32"
+address = "10.0.0.20"
+port = 10023
+
+[[device]]
+id = "dm3-foh"
+kind = "yamaha-dm3"
+address = "10.0.0.25"
+port = 49900
+
+[[mapping]]
+from = { device = "ahm-rack", channel = 3 }
+to   = { device = "x32-monitors", channel = 7 }
+bidirectional = true
+
+[[mapping]]
+from = { device = "dlive-mixrack", channel = 12 }
+to   = { device = "x32-monitors", channel = 8 }
+bidirectional = true
+
+[[mapping]]
+from = { device = "dlive-mixrack", channel = 20 }
+to   = { device = "dm3-foh", channel = 5 }
+bidirectional = true

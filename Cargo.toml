@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/discovery",
+    "crates/adapter-osc",
+    "crates/adapter-ah",
+    "crates/adapter-yamaha",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+
+preamp-bridge-core = { path = "crates/core" }
+preamp-bridge-discovery = { path = "crates/discovery" }
+preamp-bridge-adapter-osc = { path = "crates/adapter-osc" }
+preamp-bridge-adapter-ah = { path = "crates/adapter-ah" }
+preamp-bridge-adapter-yamaha = { path = "crates/adapter-yamaha" }
