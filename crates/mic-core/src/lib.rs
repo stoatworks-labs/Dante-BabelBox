@@ -61,8 +61,9 @@ mod tests {
             Ok(MicState {
                 battery_percent: Some(80),
                 battery_minutes_remaining: Some(300),
-                rf_level_dbm: Some(-45),
-                audio_level: Some(20),
+                rf_level_dbm: Some(-45.0),
+                rf_quality_percent: Some(92),
+                audio_level_dbfs: Some(-20.0),
                 muted: false,
                 frequency_mhz: Some(614.125),
                 antenna: Some(AntennaDiversity::A),
@@ -95,8 +96,9 @@ mod tests {
             state: MicState {
                 battery_percent: Some(55),
                 battery_minutes_remaining: Some(120),
-                rf_level_dbm: Some(-52),
-                audio_level: Some(12),
+                rf_level_dbm: Some(-52.0),
+                rf_quality_percent: Some(78),
+                audio_level_dbfs: Some(-12.0),
                 muted: true,
                 frequency_mhz: Some(614.125),
                 antenna: Some(AntennaDiversity::B),

@@ -109,7 +109,13 @@ fn empty_state() -> MicState {
         battery_percent: None,
         battery_minutes_remaining: None,
         rf_level_dbm: None,
-        audio_level: None,
+        // Shure has no separate signal-quality indicator distinct from
+        // raw RF level in this protocol.
+        rf_quality_percent: None,
+        // SAMPLE's `eee` (0-50) is an uncalibrated raw meter value with no
+        // documented dBFS formula - left None rather than fabricated. See
+        // parse_message's Sample arm.
+        audio_level_dbfs: None,
         muted: false,
         frequency_mhz: None,
         antenna: None,
@@ -194,7 +200,7 @@ enum ParsedUpdate {
     BatteryCharge { channel: u16, percent: Option<u8> },
     BatteryRunTime { channel: u16, minutes: Option<u16> },
     Frequency { channel: u16, mhz: Option<f64> },
-    Sample { channel: u16, antenna: Option<AntennaDiversity>, rf_dbm: i16, audio_level: u8 },
+    Sample { channel: u16, antenna: Option<AntennaDiversity>, rf_dbm: f32 },
 }
 
 fn parse_channel(token: &str) -> Option<u16> {
@@ -246,12 +252,14 @@ fn parse_message(tokens: &[String]) -> Option<ParsedUpdate> {
                 _ => None,
             };
             let rf_raw: i16 = aaa.parse().ok()?;
-            let audio_raw: u8 = eee.parse().ok()?;
+            // eee (audio level, 0-50) has no documented dBFS conversion -
+            // validated as numeric here (so a malformed message is still
+            // rejected) but deliberately not carried into MicState.
+            let _audio_raw: u8 = eee.parse().ok()?;
             Some(ParsedUpdate::Sample {
                 channel: parse_channel(ch)?,
                 antenna,
-                rf_dbm: rf_raw - 128,
-                audio_level: audio_raw,
+                rf_dbm: (rf_raw - 128) as f32,
             })
         }
         _ => None,
@@ -310,11 +318,10 @@ fn spawn_receive_loop(
                             entry.frequency_mhz = mhz;
                             (channel, *entry)
                         }
-                        ParsedUpdate::Sample { channel, antenna, rf_dbm, audio_level } => {
+                        ParsedUpdate::Sample { channel, antenna, rf_dbm } => {
                             let entry = guard.entry(channel).or_insert_with(empty_state);
                             entry.antenna = antenna;
                             entry.rf_level_dbm = Some(rf_dbm);
-                            entry.audio_level = Some(audio_level);
                             (channel, *entry)
                         }
                     }
@@ -392,17 +399,23 @@ mod tests {
 
     #[test]
     fn sample_message_matches_documented_dbm_conversion_and_antenna_codes() {
-        // aaa=087 -> dBm = 87 - 128 = -41; eee=023 audio level as-is.
+        // aaa=087 -> dBm = 87 - 128 = -41; eee=023 is validated as numeric
+        // but not carried into the update (no documented dBFS formula).
         let tokens: Vec<String> = ["SAMPLE", "1", "ALL", "AX", "087", "023"].iter().map(|s| s.to_string()).collect();
         match parse_message(&tokens) {
-            Some(ParsedUpdate::Sample { channel, antenna, rf_dbm, audio_level }) => {
+            Some(ParsedUpdate::Sample { channel, antenna, rf_dbm }) => {
                 assert_eq!(channel, 1);
                 assert_eq!(antenna, Some(AntennaDiversity::A));
-                assert_eq!(rf_dbm, -41);
-                assert_eq!(audio_level, 23);
+                assert_eq!(rf_dbm, -41.0);
             }
             _ => panic!("expected a Sample update"),
         }
+    }
+
+    #[test]
+    fn sample_message_rejects_non_numeric_audio_level() {
+        let tokens: Vec<String> = ["SAMPLE", "1", "ALL", "AX", "087", "xyz"].iter().map(|s| s.to_string()).collect();
+        assert!(parse_message(&tokens).is_none());
     }
 
     #[test]
@@ -457,7 +470,7 @@ mod tests {
             .expect("timed out waiting for sample event")
             .unwrap();
         assert_eq!(second.state.antenna, Some(AntennaDiversity::B));
-        assert_eq!(second.state.rf_level_dbm, Some(100 - 128));
-        assert_eq!(second.state.audio_level, Some(30));
+        assert_eq!(second.state.rf_level_dbm, Some(-28.0));
+        assert_eq!(second.state.audio_level_dbfs, None);
     }
 }

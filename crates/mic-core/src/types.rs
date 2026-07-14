@@ -34,14 +34,21 @@ pub enum AntennaDiversity {
 pub struct MicState {
     pub battery_percent: Option<u8>,
     pub battery_minutes_remaining: Option<u16>,
-    /// RF signal strength in dBm. Vendors that report a raw 0-N scale
-    /// instead of dBm convert it in their adapter, per that vendor's
-    /// documented formula (cited in the adapter's module doc comment).
-    pub rf_level_dbm: Option<i16>,
-    /// Metered audio level. Not a calibrated dBFS value - the scale is
-    /// whatever the vendor's own meter reports (see the adapter's module
-    /// doc comment for that vendor's exact range).
-    pub audio_level: Option<u8>,
+    /// RF signal strength in dBm. Vendors that report a raw scale instead
+    /// convert it in their adapter, per that vendor's documented formula
+    /// (cited in the adapter's module doc comment).
+    pub rf_level_dbm: Option<f32>,
+    /// RF signal quality as a 0-100 percentage, for vendors that expose a
+    /// distinct quality indicator alongside raw signal strength (e.g.
+    /// Sennheiser's RSQI). `None` for vendors that only report level.
+    pub rf_quality_percent: Option<u8>,
+    /// Audio level in calibrated dBFS. Only populated when the vendor's
+    /// own spec documents it as genuine dBFS (e.g. Sennheiser's `/m/rxN/af`).
+    /// Vendors that expose an uncalibrated raw meter with no documented
+    /// dBFS formula (e.g. Shure's SAMPLE `eee`, 0-50) leave this `None`
+    /// rather than fabricating a conversion - see that adapter's module
+    /// doc comment.
+    pub audio_level_dbfs: Option<f32>,
     pub muted: bool,
     pub frequency_mhz: Option<f64>,
     pub antenna: Option<AntennaDiversity>,
