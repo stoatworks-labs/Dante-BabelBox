@@ -1,5 +1,12 @@
 # dante-preamp-bridge
 
+> **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
+> (Anthropic). Adapters are built against official/community-authoritative
+> vendor protocol specs (see each adapter's module doc comment for its
+> source), but this has **not been validated against real hardware** —
+> only against mock devices in the test suite. Review before use on live
+> gear.
+
 Cross-vendor preamp control bridge for Dante-networked mixing consoles and
 stageboxes.
 
