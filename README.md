@@ -134,6 +134,11 @@ tested against mocked sockets — same "no guessed wire framing" discipline
 as the preamp adapters, and likewise **not yet validated against real
 hardware**.
 
+[`docs/mic-telemetry-architecture`](docs/mic-telemetry-architecture.md)
+([PDF](docs/mic-telemetry-architecture.pdf), [HTML](docs/mic-telemetry-architecture.html))
+diagrams why this domain has its own trait, both vendors' wire protocols
+sequence-by-sequence, and exactly what ends up in `MicState` per vendor.
+
 This domain is a different shape from preamp control: telemetry is
 read-heavy (battery, RF level, audio level are monitoring-only; mute is
 the only realistic write), so it has its own `MicAdapter` trait and
