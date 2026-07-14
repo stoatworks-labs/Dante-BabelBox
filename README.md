@@ -1,4 +1,4 @@
-# dante-preamp-bridge
+# Dante-BabelBox
 
 > **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
 > (Anthropic). Adapters are built against official/community-authoritative
@@ -7,16 +7,22 @@
 > only against mock devices in the test suite. Review before use on live
 > gear.
 
-Cross-vendor preamp control bridge for Dante-networked mixing consoles and
-stageboxes.
+Cross-vendor Dante control bridge, currently covering two domains:
+
+1. **Preamp control** — bridges gain/phantom-power control across
+   Dante-networked mixing consoles and stageboxes from different vendors.
+2. **Radio-mic telemetry** — monitors battery, RF signal, and audio level
+   from wireless mic receivers, across vendors, whether or not the
+   hardware even has a Dante audio option installed (see the "Radio Mic
+   Telemetry" sections below for why that doesn't matter here).
 
 Dante carries audio and basic mDNS-based device discovery, but nothing
-about preamp gain or phantom power — each console vendor layers its own
-proprietary control protocol on top of the same network. This bridge
-translates those protocols so gain/phantom changes on one vendor's device
-propagate to another vendor's device over the same LAN.
+about preamp gain, phantom power, or wireless-mic status — each vendor
+layers its own proprietary control protocol on top of the same network.
+This project translates those protocols so state on one vendor's device
+is usable from outside its own ecosystem.
 
-## Status
+## Preamp Control — Status
 
 | Vendor | Device | Protocol | Status |
 |---|---|---|---|
@@ -54,7 +60,7 @@ inline bridge:
 - [macOS](docs/capture-guide-macos.md) ([PDF](docs/capture-guide-macos.pdf), [HTML](docs/capture-guide-macos.html))
 - [Linux](docs/capture-guide-linux.md) ([PDF](docs/capture-guide-linux.pdf), [HTML](docs/capture-guide-linux.html))
 
-## Architecture
+## Preamp Control — Architecture
 
 ```
 crates/
@@ -73,11 +79,11 @@ one device out to its mapped peer(s), with echo suppression so a device's
 own confirmation of a command doesn't bounce back and forth forever
 between bidirectionally-mapped devices.
 
-## Building and running
+## Preamp Control — Building and running
 
 ```sh
 cargo build --workspace
-cargo test --workspace     # 27 tests, all against mock devices - no hardware required
+cargo test --workspace     # 45 tests (both domains), all against mock devices - no hardware required
 
 # Browse Dante's mDNS advertisements for devices on the LAN
 cargo run --bin preamp-bridge -- discover
@@ -91,7 +97,7 @@ Editing `bridge.toml` while the bridge is running hot-reloads the mapping
 table (not the device list — adding or removing a device still needs a
 restart).
 
-## Config format
+## Preamp Control — Config format
 
 See [`bridge.example.toml`](bridge.example.toml) for a worked example
 covering all four implemented device kinds. Shape:
@@ -114,14 +120,84 @@ unit is — an X32 headamp number, a dLive physical preamp Socket number
 (distinct from processing channel), a DM3 Local Input number, etc. See
 the relevant adapter's module doc comment for exact ranges.
 
+## Radio Mic Telemetry — Status
+
+| Vendor | Device | Protocol | Status |
+|---|---|---|---|
+| Shure | ULX-D | ASCII command strings (TCP 2202) | Done |
+| Shure | Axient Digital | ASCII command strings (TCP 2202) | Wire framing done; field-level behavior only spot-checked against the doc, see adapter's module comment |
+| Sennheiser | EW-DX EM 2 / EM 2 Dante / EM 4 Dante | Sound Control Protocol, SSC (JSON over UDP) | Done |
+
+Both adapters are built from official vendor specs (see each adapter's
+module doc comment for the exact document and URL) and unit/integration
+tested against mocked sockets — same "no guessed wire framing" discipline
+as the preamp adapters, and likewise **not yet validated against real
+hardware**.
+
+This domain is a different shape from preamp control: telemetry is
+read-heavy (battery, RF level, audio level are monitoring-only; mute is
+the only realistic write), so it has its own `MicAdapter` trait and
+`MicState` type (`crates/mic-core`) rather than extending the preamp
+`DeviceAdapter`/`Router` — see that crate's module doc comment for why.
+
+Because every adapter only ever talks to a device's IP control channel,
+support here is **Dante-optional by construction** — it works the same
+whether or not the specific unit has a Dante audio card installed, since
+Dante audio is never touched at all.
+
+## Radio Mic Telemetry — Architecture
+
+```
+crates/
+├── mic-core/                   # MicAdapter trait, MicState/MicEvent types
+├── mic-adapter-shure/           # ULX-D + Axient Digital (ASCII over TCP)
+├── mic-adapter-sennheiser/      # EW-DX EM (JSON/SSC over UDP)
+└── mic-cli/                     # `mic-monitor` binary: discover, watch
+```
+
+## Radio Mic Telemetry — Building and running
+
+```sh
+# Connect to the mics in mics.toml and print live telemetry
+cp mics.example.toml mics.toml   # edit for your rig
+cargo run --bin mic-monitor -- watch --config mics.toml
+```
+
+`mic-monitor discover` reuses the same Dante mDNS browse as
+`preamp-bridge discover` — a convenience for Dante-enabled units, not a
+requirement; anything else (including hardware with no Dante card at
+all) is configured directly by IP in `mics.toml`.
+
+## Radio Mic Telemetry — Config format
+
+```toml
+[[mic]]
+id = "ulxd-1"
+kind = "shure-ulxd"       # shure-ulxd | shure-axient | sennheiser-ewdx
+address = "10.0.0.30"
+port = 2202                 # optional, defaults to the protocol's standard port (2202 Shure, 45 Sennheiser)
+```
+
+No `[[mapping]]` section — this domain is pure monitoring, nothing to
+route between devices (yet; see below).
+
+**Not yet built:** emulating a supported vendor's telemetry protocol on a
+host console (e.g. making a Yamaha QL's Wireless Monitor screen show
+synthesized ULX-D-shaped data for a mic it doesn't natively support) —
+the same class of problem as preamp device emulation above, needing
+packet captures of a real console+device pairing to learn the display's
+own query/identity handshake. Deferred until there's real hardware
+access.
+
 ## Contributing a new adapter
 
 Every adapter so far follows the same shape: read the official (or
-community-authoritative) protocol doc, implement `DeviceAdapter` against
-it exactly, write unit tests against the documented byte/message
-examples, and add an integration test bridging it through the `Router`
-against a mock socket. Don't implement against guessed wire framing —
-several vendors here (Qu/SQ, CL/QL, Rio/Tio) are deliberately left
-unimplemented because no public spec covers their preamp control; closing
-those gaps needs either a real spec or packet captures from real
-hardware, not assumptions.
+community-authoritative) protocol doc, implement the relevant trait
+(`DeviceAdapter` for preamp control, `MicAdapter` for radio-mic
+telemetry) against it exactly, write unit tests against the documented
+byte/message examples, and add an integration test through a mock
+socket. Don't implement against guessed wire framing — several vendors
+here (preamp: Qu/SQ, CL/QL, Rio/Tio) are deliberately left unimplemented
+because no public spec covers the relevant control; closing those gaps
+needs either a real spec or packet captures from real hardware, not
+assumptions.

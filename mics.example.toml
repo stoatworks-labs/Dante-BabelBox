@@ -1,0 +1,26 @@
+# Example mic-monitor configuration. Copy to mics.toml and edit for your rig.
+#
+# Implemented kinds today:
+#   "shure-ulxd"      Shure ULX-D receivers (ASCII command strings, TCP 2202)
+#   "shure-axient"    Shure Axient Digital receivers (same protocol as ULX-D)
+#   "sennheiser-ewdx" Sennheiser EW-DX EM 2 / EM 2 Dante / EM 4 Dante (SSC, UDP 45)
+#
+# No [[mapping]] section - this is monitoring only, nothing to route
+# between devices.
+
+[[mic]]
+id = "ulxd-foh"
+kind = "shure-ulxd"
+address = "10.0.0.30"
+port = 2202
+
+[[mic]]
+id = "axient-1"
+kind = "shure-axient"
+address = "10.0.0.31"
+
+[[mic]]
+id = "ewdx-1"
+kind = "sennheiser-ewdx"
+address = "10.0.0.32"
+port = 45

@@ -1,8 +1,14 @@
 # Usage Guide
 
-This guide covers what the bridge does, how it works internally, and how
-to configure and run it. For the current implementation status by vendor,
-see the table in [README.md](README.md).
+This guide covers what's in this workspace, how it works internally, and
+how to configure and run each part. For the current implementation status
+by vendor, see the tables in [README.md](README.md).
+
+There are two independent tools here, sharing the same workspace and
+`dante-babelbox-discovery` crate but otherwise unrelated: `preamp-bridge`
+(preamp gain/phantom control) below, and `mic-monitor` (radio-mic
+telemetry) in the "mic-monitor — Radio Mic Telemetry" section further
+down.
 
 ## What it does
 
@@ -63,7 +69,7 @@ crates/
 
 ```sh
 cargo build --workspace
-cargo test --workspace     # 27 tests, all against mock devices - no hardware required
+cargo test --workspace     # 45 tests (both preamp-bridge and mic-monitor), no hardware required
 ```
 
 ## Commands
@@ -183,9 +189,104 @@ suppression preventing feedback loops).
   value as reported, it doesn't interpolate between differing
   resolutions.
 
+## `mic-monitor` — Radio Mic Telemetry
+
+### What it does
+
+`mic-monitor` connects to wireless-mic receivers over their native IP
+control channel and prints live telemetry — battery level, RF signal,
+audio level, mute state, frequency — regardless of vendor. Unlike
+`preamp-bridge`, it doesn't route anything between devices; it's pure
+monitoring. It also doesn't care whether the receiver has a Dante audio
+card installed, since it never touches the audio path, only the control
+channel.
+
+### How it works
+
+```
+crates/
+├── mic-core/                   # MicAdapter trait, MicState/MicEvent types
+├── mic-adapter-shure/           # ULX-D + Axient Digital (ASCII over TCP 2202)
+├── mic-adapter-sennheiser/      # EW-DX EM (JSON/SSC over UDP 45)
+└── mic-cli/                     # `mic-monitor` binary: discover, watch
+```
+
+`MicAdapter` is a separate trait from `DeviceAdapter` (see
+`crates/mic-core/src/adapter.rs`'s doc comment for why) — telemetry is
+read-heavy, with `mute` as the only realistic write, so there's no
+`Router`/mapping concept here, just a per-channel `get_state` and a
+`subscribe` stream of updates.
+
+### Commands
+
+#### `mic-monitor discover`
+
+Same Dante mDNS browse as `preamp-bridge discover` (they share the
+`dante-babelbox-discovery` crate) — a convenience for finding Dante-
+advertised devices, not a requirement. Non-Dante hardware, or hardware
+discovery hasn't found yet, is configured directly by IP in `mics.toml`.
+
+```sh
+cargo run --bin mic-monitor -- discover
+```
+
+#### `mic-monitor watch`
+
+Connects every configured mic, then prints a line per telemetry update
+as it arrives:
+
+```sh
+cp mics.example.toml mics.toml   # edit for your rig
+cargo run --bin mic-monitor -- watch --config mics.toml   # --config defaults to mics.toml
+```
+
+```
+ulxd-foh ch1: battery=82% runtime=300min rf=-45dBm quality=n/a af=n/a antenna=A freq=614.125MHz mute=false
+ewdx-1 ch1: battery=72% runtime=245min rf=-50dBm quality=88% af=-18dBFS antenna=A freq=614.125MHz mute=false
+```
+
+Fields a vendor doesn't report show as `n/a` rather than a fabricated
+value — e.g. Shure's `quality`/`af` are always `n/a` since Shure's
+protocol doesn't document a signal-quality indicator or a calibrated
+dBFS conversion for its raw audio meter (see `mic-adapter-shure`'s module
+doc comment).
+
+On startup, channels 1-4 are proactively probed for each device so
+Sennheiser receivers (which need a per-channel subscribe to start
+sending telemetry) begin flowing data; a channel a smaller unit doesn't
+have just logs a debug-level "not available" and is otherwise ignored.
+
+### Configuring `mics.toml`
+
+Copy [`mics.example.toml`](mics.example.toml) as a starting point:
+
+```toml
+[[mic]]
+id = "ulxd-1"          # your own label
+kind = "shure-ulxd"     # shure-ulxd | shure-axient | sennheiser-ewdx
+address = "10.0.0.30"   # IP on the control network
+port = 2202              # optional - defaults to 2202 (Shure) or 45 (Sennheiser)
+```
+
+No `[[mapping]]` section — nothing to route between mics.
+
+### Troubleshooting
+
+- **`quality`/`af` always show `n/a` for a Shure mic** — expected; Shure's
+  protocol doesn't document those fields the way Sennheiser's does. See
+  `mic-adapter-shure`'s module doc comment.
+- **A Sennheiser channel never reports anything** — subscriptions there
+  default to a 1-hour lifetime (requested explicitly in `connect()`); a
+  `watch` session running longer than that would need re-subscription,
+  which isn't implemented yet.
+- **`watch` connects but nothing ever prints** — confirm the configured
+  `address`/`port` actually matches the device's control port (2202 for
+  Shure, 45 for Sennheiser unless changed), and that nothing else already
+  holds an exclusive connection to it.
+
 ## Contributing a new adapter
 
 See the "Contributing a new adapter" section in [README.md](README.md) —
 in short: implement strictly against an official or community-authoritative
 protocol spec, not guessed wire framing, with unit tests against the
-spec's own worked examples and an integration test through the `Router`.
+spec's own worked examples and an integration test through a mock socket.
