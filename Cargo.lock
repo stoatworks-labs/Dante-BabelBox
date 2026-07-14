@@ -185,6 +185,79 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
+name = "dante-babelbox-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "dante-babelbox-discovery"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "mdns-sd",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "dante-babelbox-preamp-adapter-ah"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dante-babelbox-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "dante-babelbox-preamp-adapter-osc"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dante-babelbox-core",
+ "rosc",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "dante-babelbox-preamp-adapter-yamaha"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dante-babelbox-core",
+ "rosc",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "dante-babelbox-preamp-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dante-babelbox-core",
+ "dante-babelbox-discovery",
+ "dante-babelbox-preamp-adapter-ah",
+ "dante-babelbox-preamp-adapter-osc",
+ "dante-babelbox-preamp-adapter-yamaha",
+ "notify",
+ "rosc",
+ "serde",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -497,79 +570,6 @@ dependencies = [
  "log",
  "pin-project-lite",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "preamp-bridge"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "notify",
- "preamp-bridge-adapter-ah",
- "preamp-bridge-adapter-osc",
- "preamp-bridge-adapter-yamaha",
- "preamp-bridge-core",
- "preamp-bridge-discovery",
- "rosc",
- "serde",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "preamp-bridge-adapter-ah"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "preamp-bridge-core",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "preamp-bridge-adapter-osc"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "preamp-bridge-core",
- "rosc",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "preamp-bridge-adapter-yamaha"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "preamp-bridge-core",
- "rosc",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "preamp-bridge-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "preamp-bridge-discovery"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "mdns-sd",
- "tokio",
- "tracing",
 ]
 
 [[package]]

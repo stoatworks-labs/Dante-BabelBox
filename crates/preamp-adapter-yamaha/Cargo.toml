@@ -1,11 +1,11 @@
 [package]
-name = "preamp-bridge-adapter-osc"
+name = "dante-babelbox-preamp-adapter-yamaha"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-preamp-bridge-core.workspace = true
+dante-babelbox-core.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 tracing.workspace = true

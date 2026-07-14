@@ -1,5 +1,5 @@
 [package]
-name = "preamp-bridge"
+name = "dante-babelbox-preamp-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,11 +9,11 @@ name = "preamp-bridge"
 path = "src/main.rs"
 
 [dependencies]
-preamp-bridge-core.workspace = true
-preamp-bridge-discovery.workspace = true
-preamp-bridge-adapter-osc.workspace = true
-preamp-bridge-adapter-ah.workspace = true
-preamp-bridge-adapter-yamaha.workspace = true
+dante-babelbox-core.workspace = true
+dante-babelbox-discovery.workspace = true
+dante-babelbox-preamp-adapter-osc.workspace = true
+dante-babelbox-preamp-adapter-ah.workspace = true
+dante-babelbox-preamp-adapter-yamaha.workspace = true
 tokio.workspace = true
 clap.workspace = true
 tracing.workspace = true

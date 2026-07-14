@@ -44,7 +44,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use preamp_bridge_core::{
+use dante_babelbox_core::{
     AdapterError, AdapterResult, DeviceAdapter, DeviceInfo, PreampAddress, PreampEvent, PreampState,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

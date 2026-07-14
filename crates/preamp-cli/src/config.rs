@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use preamp_bridge_core::Mapping;
+use dante_babelbox_core::Mapping;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]

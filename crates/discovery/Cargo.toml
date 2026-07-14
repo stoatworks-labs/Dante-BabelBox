@@ -1,5 +1,5 @@
 [package]
-name = "preamp-bridge-discovery"
+name = "dante-babelbox-discovery"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

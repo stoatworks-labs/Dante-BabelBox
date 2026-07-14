@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
-use preamp_bridge_adapter_ah::{AhmAdapter, DliveAdapter};
-use preamp_bridge_adapter_osc::{WingAdapter, X32Adapter};
-use preamp_bridge_adapter_yamaha::Dm3Adapter;
-use preamp_bridge_core::{DeviceAdapter, Router};
+use dante_babelbox_preamp_adapter_ah::{AhmAdapter, DliveAdapter};
+use dante_babelbox_preamp_adapter_osc::{WingAdapter, X32Adapter};
+use dante_babelbox_preamp_adapter_yamaha::Dm3Adapter;
+use dante_babelbox_core::{DeviceAdapter, Router};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
@@ -113,7 +113,7 @@ async fn watch_and_apply_mappings(path: PathBuf, router: Arc<Router>) {
 mod tests {
     use super::*;
     use crate::config::DeviceConfig;
-    use preamp_bridge_core::{Mapping, PreampAddress};
+    use dante_babelbox_core::{Mapping, PreampAddress};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, UdpSocket};

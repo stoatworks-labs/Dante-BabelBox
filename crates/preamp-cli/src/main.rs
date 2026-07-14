@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Discover { timeout_secs } => {
-            let devices = preamp_bridge_discovery::discover(Duration::from_secs(timeout_secs)).await?;
+            let devices = dante_babelbox_discovery::discover(Duration::from_secs(timeout_secs)).await?;
             if devices.is_empty() {
                 println!("No Dante devices found.");
             } else {

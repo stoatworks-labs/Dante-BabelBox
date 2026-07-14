@@ -32,7 +32,7 @@ Every "Done" adapter is built from an official vendor spec (or, for the
 X32 family, the long-established community reference), not guesswork, and
 is unit- and integration-tested against mock devices standing in for the
 real protocol. See each adapter's module doc comment
-(`crates/adapter-*/src/*.rs`) for the exact spec it's built from and any
+(`crates/preamp-adapter-*/src/*.rs`) for the exact spec it's built from and any
 open gaps.
 
 **Not yet built:** device emulation (making the bridge answer as if it
@@ -58,12 +58,12 @@ inline bridge:
 
 ```
 crates/
-├── core/            # PreampAddress/State/Event types, DeviceAdapter trait, Router
-├── discovery/        # mDNS-based Dante device discovery
-├── adapter-osc/       # X32-family + Wing (Behringer/Midas OSC dialects)
-├── adapter-ah/        # AHM TCP/IP + dLive MIDI-over-TCP (Allen & Heath)
-├── adapter-yamaha/    # DM3 OSC
-└── cli/               # `preamp-bridge` binary: discover, run, config, hot-reload
+├── core/                    # shared AdapterError/DeviceInfo + preamp Router/types
+├── discovery/                # mDNS-based Dante device discovery
+├── preamp-adapter-osc/        # X32-family + Wing (Behringer/Midas OSC dialects)
+├── preamp-adapter-ah/         # AHM TCP/IP + dLive MIDI-over-TCP (Allen & Heath)
+├── preamp-adapter-yamaha/     # DM3 OSC
+└── preamp-cli/                # `preamp-bridge` binary: discover, run, config, hot-reload
 ```
 
 Each adapter implements `core::DeviceAdapter` (connect, set_gain,
@@ -80,11 +80,11 @@ cargo build --workspace
 cargo test --workspace     # 27 tests, all against mock devices - no hardware required
 
 # Browse Dante's mDNS advertisements for devices on the LAN
-cargo run -p preamp-bridge -- discover
+cargo run --bin preamp-bridge -- discover
 
 # Run the bridge daemon
 cp bridge.example.toml bridge.toml   # edit for your rig
-cargo run -p preamp-bridge -- run --config bridge.toml
+cargo run --bin preamp-bridge -- run --config bridge.toml
 ```
 
 Editing `bridge.toml` while the bridge is running hot-reloads the mapping

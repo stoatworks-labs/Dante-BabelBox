@@ -31,12 +31,12 @@ true device emulation would take.
 
 ```
 crates/
-├── core/            # PreampAddress/State/Event types, DeviceAdapter trait, Router
-├── discovery/        # mDNS-based Dante device discovery
-├── adapter-osc/       # X32-family + Wing (Behringer/Midas OSC dialects)
-├── adapter-ah/        # AHM TCP/IP + dLive MIDI-over-TCP (Allen & Heath)
-├── adapter-yamaha/    # DM3 OSC
-└── cli/               # `preamp-bridge` binary: discover, run, config, hot-reload
+├── core/                    # shared AdapterError/DeviceInfo + preamp Router/types
+├── discovery/                # mDNS-based Dante device discovery
+├── preamp-adapter-osc/        # X32-family + Wing (Behringer/Midas OSC dialects)
+├── preamp-adapter-ah/         # AHM TCP/IP + dLive MIDI-over-TCP (Allen & Heath)
+├── preamp-adapter-yamaha/     # DM3 OSC
+└── preamp-cli/                # `preamp-bridge` binary: discover, run, config, hot-reload
 ```
 
 1. **Adapters** — one per vendor protocol. Each implements a common
@@ -75,8 +75,8 @@ device it finds (name, addresses, port). Useful for finding IPs before
 writing your config.
 
 ```sh
-cargo run -p preamp-bridge -- discover
-cargo run -p preamp-bridge -- discover --timeout-secs 10   # default is 5
+cargo run --bin preamp-bridge -- discover
+cargo run --bin preamp-bridge -- discover --timeout-secs 10   # default is 5
 ```
 
 ### `preamp-bridge run`
@@ -87,7 +87,7 @@ Ctrl-C.
 
 ```sh
 cp bridge.example.toml bridge.toml   # edit for your rig
-cargo run -p preamp-bridge -- run --config bridge.toml   # --config defaults to bridge.toml
+cargo run --bin preamp-bridge -- run --config bridge.toml   # --config defaults to bridge.toml
 ```
 
 On startup it prints every device and mapping it loaded, then connects to

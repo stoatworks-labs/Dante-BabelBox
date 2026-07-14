@@ -3,10 +3,10 @@ resolver = "2"
 members = [
     "crates/core",
     "crates/discovery",
-    "crates/adapter-osc",
-    "crates/adapter-ah",
-    "crates/adapter-yamaha",
-    "crates/cli",
+    "crates/preamp-adapter-osc",
+    "crates/preamp-adapter-ah",
+    "crates/preamp-adapter-yamaha",
+    "crates/preamp-cli",
 ]
 
 [workspace.package]
@@ -25,8 +25,8 @@ thiserror = "1"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 
-preamp-bridge-core = { path = "crates/core" }
-preamp-bridge-discovery = { path = "crates/discovery" }
-preamp-bridge-adapter-osc = { path = "crates/adapter-osc" }
-preamp-bridge-adapter-ah = { path = "crates/adapter-ah" }
-preamp-bridge-adapter-yamaha = { path = "crates/adapter-yamaha" }
+dante-babelbox-core = { path = "crates/core" }
+dante-babelbox-discovery = { path = "crates/discovery" }
+dante-babelbox-preamp-adapter-osc = { path = "crates/preamp-adapter-osc" }
+dante-babelbox-preamp-adapter-ah = { path = "crates/preamp-adapter-ah" }
+dante-babelbox-preamp-adapter-yamaha = { path = "crates/preamp-adapter-yamaha" }
