@@ -206,6 +206,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante-babelbox-mic-adapter-shure"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dante-babelbox-mic-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "dante-babelbox-mic-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dante-babelbox-core",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "dante-babelbox-preamp-adapter-ah"
 version = "0.1.0"
 dependencies = [

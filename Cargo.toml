@@ -7,6 +7,8 @@ members = [
     "crates/preamp-adapter-ah",
     "crates/preamp-adapter-yamaha",
     "crates/preamp-cli",
+    "crates/mic-core",
+    "crates/mic-adapter-shure",
 ]
 
 [workspace.package]
@@ -30,3 +32,5 @@ dante-babelbox-discovery = { path = "crates/discovery" }
 dante-babelbox-preamp-adapter-osc = { path = "crates/preamp-adapter-osc" }
 dante-babelbox-preamp-adapter-ah = { path = "crates/preamp-adapter-ah" }
 dante-babelbox-preamp-adapter-yamaha = { path = "crates/preamp-adapter-yamaha" }
+dante-babelbox-mic-core = { path = "crates/mic-core" }
+dante-babelbox-mic-adapter-shure = { path = "crates/mic-adapter-shure" }
