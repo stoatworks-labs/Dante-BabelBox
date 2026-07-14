@@ -10,6 +10,7 @@ members = [
     "crates/mic-core",
     "crates/mic-adapter-shure",
     "crates/mic-adapter-sennheiser",
+    "crates/mic-cli",
 ]
 
 [workspace.package]

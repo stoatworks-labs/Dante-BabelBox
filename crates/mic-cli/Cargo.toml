@@ -1,0 +1,22 @@
+[package]
+name = "dante-babelbox-mic-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mic-monitor"
+path = "src/main.rs"
+
+[dependencies]
+dante-babelbox-mic-core.workspace = true
+dante-babelbox-mic-adapter-shure.workspace = true
+dante-babelbox-mic-adapter-sennheiser.workspace = true
+dante-babelbox-discovery.workspace = true
+tokio.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+toml.workspace = true

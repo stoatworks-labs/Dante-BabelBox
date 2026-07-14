@@ -227,6 +227,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante-babelbox-mic-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dante-babelbox-discovery",
+ "dante-babelbox-mic-adapter-sennheiser",
+ "dante-babelbox-mic-adapter-shure",
+ "dante-babelbox-mic-core",
+ "serde",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "dante-babelbox-mic-core"
 version = "0.1.0"
 dependencies = [
