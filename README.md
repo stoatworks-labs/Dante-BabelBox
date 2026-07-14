@@ -43,6 +43,17 @@ router you configure by IP/channel — genuinely useful, but not yet
 since it means impersonating a device's discovery/pairing handshake
 closely enough that real gear accepts it.
 
+Building that requires packet captures of a real console paired with its
+own native device (e.g. a real Yamaha QL1 talking to a real Rio/Tio, not
+a foreign-vendor box) — none of that handshake is in any public spec.
+[`docs/`](docs/) has a non-technical field guide, one edition per OS, for
+capturing that traffic with Wireshark using nothing but a laptop as an
+inline bridge:
+
+- [Windows](docs/capture-guide-windows.md) ([PDF](docs/capture-guide-windows.pdf), [HTML](docs/capture-guide-windows.html))
+- [macOS](docs/capture-guide-macos.md) ([PDF](docs/capture-guide-macos.pdf), [HTML](docs/capture-guide-macos.html))
+- [Linux](docs/capture-guide-linux.md) ([PDF](docs/capture-guide-linux.pdf), [HTML](docs/capture-guide-linux.html))
+
 ## Architecture
 
 ```
