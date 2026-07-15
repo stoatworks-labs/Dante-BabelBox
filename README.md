@@ -153,6 +153,10 @@ mappings, all live.
 
 ## Preamp Control — Patch-bay web UI
 
+![Patch-bay web UI: the Patch tab, with source devices on the left and destination devices on the right, each a rack strip of numbered channel jacks, and green patch cables joining mapped channels](docs/screenshots/patch-bay.png)
+
+*Real screenshot of the running web UI (`preamp-bridge run`). The devices shown are **virtual** placeholders so the UI can be demoed without any hardware on the network — see "Device management" below.*
+
 `run` also serves a web UI, bound by default to `0.0.0.0:8080` so anyone
 on the LAN can reach it at `http://<this-machine's-IP>:8080` - no
 separate app to install, just a browser, from any device on the network.
