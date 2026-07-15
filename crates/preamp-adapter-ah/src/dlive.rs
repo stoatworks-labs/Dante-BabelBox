@@ -39,8 +39,8 @@
 //! Pitchbend push - not explicitly stated for this parameter in the spec).
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -50,7 +50,8 @@ use dante_babelbox_core::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::TcpStream;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, oneshot, Mutex};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 const SYSEX_HEADER: [u8; 8] = [0xF0, 0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00];
@@ -65,9 +66,13 @@ const OP_48V_STATUS: u8 = 0x0B;
 const OP_SET_48V: u8 = 0x0C;
 const OP_GET_GAIN: u8 = 0x0B; // reuses the generic NRPN-get template (param 0x19); see module doc
 const PARAM_GAIN: u8 = 0x19;
+const OP_GET_NAME: u8 = 0x01;
+const OP_NAME_REPLY: u8 = 0x02;
 
 const GAIN_MIN_DB: f32 = 5.0;
 const GAIN_MAX_DB: f32 = 60.0;
+
+type PendingIdentify = Arc<StdMutex<Option<oneshot::Sender<DeviceInfo>>>>;
 
 pub struct DliveAdapter {
     id: Arc<str>,
@@ -75,6 +80,8 @@ pub struct DliveAdapter {
     writer: Option<Arc<Mutex<OwnedWriteHalf>>>,
     tx: broadcast::Sender<PreampEvent>,
     state: Arc<Mutex<HashMap<u16, PreampState>>>,
+    pending_identify: PendingIdentify,
+    cancel: CancellationToken,
 }
 
 impl DliveAdapter {
@@ -86,6 +93,8 @@ impl DliveAdapter {
             writer: None,
             tx,
             state: Arc::new(Mutex::new(HashMap::new())),
+            pending_identify: Arc::new(StdMutex::new(None)),
+            cancel: CancellationToken::new(),
         }
     }
 
@@ -169,15 +178,38 @@ impl DeviceAdapter for DliveAdapter {
         let (read_half, write_half) = stream.into_split();
         self.writer = Some(Arc::new(Mutex::new(write_half)));
 
-        spawn_receive_loop(read_half, Arc::clone(&self.id), self.tx.clone(), Arc::clone(&self.state));
+        spawn_receive_loop(
+            read_half,
+            Arc::clone(&self.id),
+            self.tx.clone(),
+            Arc::clone(&self.state),
+            Arc::clone(&self.pending_identify),
+            self.remote.ip(),
+            self.cancel.clone(),
+        );
 
         Ok(())
     }
 
+    async fn disconnect(&mut self) -> AdapterResult<()> {
+        self.cancel.cancel();
+        Ok(())
+    }
+
     async fn identify(&mut self) -> AdapterResult<DeviceInfo> {
-        Err(AdapterError::Protocol(
-            "identify: dLive MIDI protocol has no device-identity query".into(),
-        ))
+        // Same probe-based approach as the AHM adapter: dLive's Get
+        // Channel Name reply (opcode 0x02, dLive's 0x10 header byte,
+        // distinct from AHM's 0x12) confirms protocol family; the spec
+        // has no model-string query, so model is reported as unknown.
+        let (tx, rx) = oneshot::channel();
+        *self.pending_identify.lock().unwrap() = Some(tx);
+        let mut msg = SYSEX_HEADER.to_vec();
+        msg.extend_from_slice(&[MIDI_N, OP_GET_NAME, 0x00, 0xF7]);
+        self.send(&msg).await?;
+        tokio::time::timeout(Duration::from_secs(2), rx)
+            .await
+            .map_err(|_| AdapterError::Protocol("identify: timed out waiting for Channel Name reply".into()))?
+            .map_err(|_| AdapterError::Protocol("identify: reply channel dropped".into()))
     }
 
     async fn set_gain(&mut self, channel: u16, gain_db: f32) -> AdapterResult<()> {
@@ -295,31 +327,64 @@ impl MidiStreamParser {
     }
 }
 
+/// Recognizes a dLive Get Channel Name reply (`SysEx Header, 0N, 0x02, CH,
+/// Name, F7`) as identify confirmation - doesn't decode the name itself,
+/// only used to confirm protocol family (dLive's spec has no
+/// model-string query). dLive's SysEx header byte (0x10) already
+/// distinguishes it from AHM's (0x12) since `msg` must match this
+/// adapter's own `SYSEX_HEADER` to reach here.
+fn parse_identify_reply(msg: &[u8], address: IpAddr) -> Option<DeviceInfo> {
+    if msg.len() < 12 || !msg.starts_with(&SYSEX_HEADER) || msg.last() != Some(&0xF7) {
+        return None;
+    }
+    let body = &msg[SYSEX_HEADER.len()..msg.len() - 1];
+    if body.get(1) != Some(&OP_NAME_REPLY) {
+        return None;
+    }
+    Some(DeviceInfo {
+        vendor: "Allen & Heath (dLive)".to_string(),
+        model: "unknown (no model query documented)".to_string(),
+        address,
+    })
+}
+
 fn spawn_receive_loop(
     mut read_half: tokio::net::tcp::OwnedReadHalf,
     id: Arc<str>,
     tx: broadcast::Sender<PreampEvent>,
     state: Arc<Mutex<HashMap<u16, PreampState>>>,
+    pending_identify: PendingIdentify,
+    remote_ip: IpAddr,
+    cancel: CancellationToken,
 ) {
     tokio::spawn(async move {
         let mut parser = MidiStreamParser::default();
         let mut buf = [0u8; 4096];
 
         loop {
-            let len = match read_half.read(&mut buf).await {
-                Ok(0) => {
-                    debug!(device = %id, "dLive TCP connection closed");
-                    return;
-                }
-                Ok(len) => len,
-                Err(e) => {
-                    warn!(device = %id, error = %e, "dLive TCP read failed, stopping receive loop");
-                    return;
-                }
+            let len = tokio::select! {
+                _ = cancel.cancelled() => return,
+                result = read_half.read(&mut buf) => match result {
+                    Ok(0) => {
+                        debug!(device = %id, "dLive TCP connection closed");
+                        return;
+                    }
+                    Ok(len) => len,
+                    Err(e) => {
+                        warn!(device = %id, error = %e, "dLive TCP read failed, stopping receive loop");
+                        return;
+                    }
+                },
             };
             parser.push(&buf[..len]);
 
             while let Some(msg) = parser.next_message() {
+                if let Some(info) = parse_identify_reply(&msg, remote_ip) {
+                    if let Some(sender) = pending_identify.lock().unwrap().take() {
+                        let _ = sender.send(info);
+                    }
+                    continue;
+                }
                 handle_message(&msg, &id, &tx, &state).await;
             }
         }
@@ -482,5 +547,76 @@ mod tests {
             .unwrap();
         assert_eq!(event.address, PreampAddress::new("dlive-1", 65));
         assert!(event.state.phantom);
+    }
+
+    #[test]
+    fn parse_identify_reply_uses_dlive_opcode_not_ahms() {
+        let addr: IpAddr = "10.0.0.5".parse().unwrap();
+
+        let mut good = SYSEX_HEADER.to_vec();
+        good.extend_from_slice(&[0x00, OP_NAME_REPLY, 0x00, b'F', b'O', b'H', 0xF7]);
+        let info = parse_identify_reply(&good, addr).unwrap();
+        assert_eq!(info.vendor, "Allen & Heath (dLive)");
+
+        // AHM's name-reply opcode (0x0A) must not match dLive's (0x02).
+        let mut ahm_opcode = SYSEX_HEADER.to_vec();
+        ahm_opcode.extend_from_slice(&[0x00, 0x0A, 0x00, b'F', b'O', b'H', 0xF7]);
+        assert!(parse_identify_reply(&ahm_opcode, addr).is_none());
+    }
+
+    #[tokio::test]
+    async fn identify_resolves_from_channel_name_reply() {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let mut adapter = DliveAdapter::new("dlive-1", addr);
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+
+            let mut expected = SYSEX_HEADER.to_vec();
+            expected.extend_from_slice(&[0x00, OP_GET_NAME, 0x00, 0xF7]);
+            let mut buf = vec![0u8; expected.len()];
+            socket.read_exact(&mut buf).await.unwrap();
+            assert_eq!(buf, expected);
+
+            let mut reply = SYSEX_HEADER.to_vec();
+            reply.extend_from_slice(&[0x00, OP_NAME_REPLY, 0x00, b'F', b'O', b'H', 0xF7]);
+            socket.write_all(&reply).await.unwrap();
+        });
+
+        adapter.connect().await.unwrap();
+        let info = adapter.identify().await.unwrap();
+        assert_eq!(info.vendor, "Allen & Heath (dLive)");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn disconnect_stops_the_receive_loop() {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let mut adapter = DliveAdapter::new("dlive-1", addr);
+        let mut events = adapter.subscribe();
+
+        let server = tokio::spawn(async move { listener.accept().await.unwrap().0 });
+
+        adapter.connect().await.unwrap();
+        let mut socket = server.await.unwrap();
+
+        adapter.disconnect().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await; // let the loop actually exit
+
+        // Spontaneous 48V-on push for socket 0 (channel 1), as the unit would send.
+        let mut msg = SYSEX_HEADER.to_vec();
+        msg.extend_from_slice(&[0x00, OP_48V_STATUS, 0x00, 0x7F, 0xF7]);
+        socket.write_all(&msg).await.unwrap();
+
+        let result = tokio::time::timeout(Duration::from_millis(200), events.recv()).await;
+        assert!(result.is_err(), "must not receive events after disconnect");
     }
 }

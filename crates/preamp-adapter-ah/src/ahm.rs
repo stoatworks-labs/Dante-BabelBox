@@ -30,8 +30,8 @@
 //! authoritative here since AHM and dLive share this NRPN scheme.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -41,7 +41,8 @@ use dante_babelbox_core::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::TcpStream;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, oneshot, Mutex};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 const SYSEX_HEADER: [u8; 8] = [0xF0, 0x00, 0x00, 0x1A, 0x50, 0x12, 0x01, 0x00];
@@ -49,9 +50,13 @@ const PARAM_GAIN: u8 = 0x19;
 const PARAM_PAD: u8 = 0x1A;
 const PARAM_PHANTOM: u8 = 0x1B;
 const MIDI_N_INPUTS: u8 = 0x00; // "N" for Inputs 1-64, per the Channel selection table
+const OP_GET_NAME: u8 = 0x09;
+const OP_NAME_REPLY: u8 = 0x0A;
 
 const GAIN_MIN_DB: f32 = 5.0;
 const GAIN_MAX_DB: f32 = 60.0;
+
+type PendingIdentify = Arc<StdMutex<Option<oneshot::Sender<DeviceInfo>>>>;
 
 pub struct AhmAdapter {
     id: Arc<str>,
@@ -59,6 +64,8 @@ pub struct AhmAdapter {
     writer: Option<Arc<Mutex<OwnedWriteHalf>>>,
     tx: broadcast::Sender<PreampEvent>,
     state: Arc<Mutex<HashMap<u16, PreampState>>>,
+    pending_identify: PendingIdentify,
+    cancel: CancellationToken,
 }
 
 impl AhmAdapter {
@@ -70,6 +77,8 @@ impl AhmAdapter {
             writer: None,
             tx,
             state: Arc::new(Mutex::new(HashMap::new())),
+            pending_identify: Arc::new(StdMutex::new(None)),
+            cancel: CancellationToken::new(),
         }
     }
 
@@ -143,19 +152,39 @@ impl DeviceAdapter for AhmAdapter {
         let (read_half, write_half) = stream.into_split();
         self.writer = Some(Arc::new(Mutex::new(write_half)));
 
-        spawn_receive_loop(read_half, Arc::clone(&self.id), self.tx.clone(), Arc::clone(&self.state));
+        spawn_receive_loop(
+            read_half,
+            Arc::clone(&self.id),
+            self.tx.clone(),
+            Arc::clone(&self.state),
+            Arc::clone(&self.pending_identify),
+            self.remote.ip(),
+            self.cancel.clone(),
+        );
 
         Ok(())
     }
 
+    async fn disconnect(&mut self) -> AdapterResult<()> {
+        self.cancel.cancel();
+        Ok(())
+    }
+
     async fn identify(&mut self) -> AdapterResult<DeviceInfo> {
-        // The AHM protocol has no explicit "who are you" message in the
-        // spec beyond channel-name/colour queries, which don't confirm
-        // vendor/model either. Not implemented - see the OSC adapter's
-        // identify() for the same gap on that side.
-        Err(AdapterError::Protocol(
-            "identify: AHM protocol has no device-identity query".into(),
-        ))
+        // The spec has no dedicated "who are you" message, so this uses
+        // Get Channel Name on Input 1 as a presence probe: a reply in the
+        // expected shape (AHM's SysEx header + opcode 0x0A) confirms the
+        // protocol family, but the spec gives no model-string query, so
+        // the model is reported as unknown rather than guessed.
+        let (tx, rx) = oneshot::channel();
+        *self.pending_identify.lock().unwrap() = Some(tx);
+        let mut msg = SYSEX_HEADER.to_vec();
+        msg.extend_from_slice(&[MIDI_N_INPUTS, OP_GET_NAME, 0x00, 0xF7]);
+        self.send(&msg).await?;
+        tokio::time::timeout(Duration::from_secs(2), rx)
+            .await
+            .map_err(|_| AdapterError::Protocol("identify: timed out waiting for Channel Name reply".into()))?
+            .map_err(|_| AdapterError::Protocol("identify: reply channel dropped".into()))
     }
 
     async fn set_gain(&mut self, channel: u16, gain_db: f32) -> AdapterResult<()> {
@@ -268,11 +297,33 @@ impl NrpnTracker {
     }
 }
 
+/// Recognizes an AHM Get Channel Name reply (`SysEx Header, 0N, 0A, CH,
+/// Name, F7`) as identify confirmation. Doesn't decode the name itself -
+/// only used to confirm protocol family, since AHM's spec has no
+/// model-string query.
+fn parse_identify_reply(msg: &[u8], address: IpAddr) -> Option<DeviceInfo> {
+    if msg.len() < 12 || !msg.starts_with(&SYSEX_HEADER) || msg.last() != Some(&0xF7) {
+        return None;
+    }
+    let body = &msg[SYSEX_HEADER.len()..msg.len() - 1];
+    if body.get(1) != Some(&OP_NAME_REPLY) {
+        return None;
+    }
+    Some(DeviceInfo {
+        vendor: "Allen & Heath (AHM)".to_string(),
+        model: "unknown (no model query documented)".to_string(),
+        address,
+    })
+}
+
 fn spawn_receive_loop(
     mut read_half: tokio::net::tcp::OwnedReadHalf,
     id: Arc<str>,
     tx: broadcast::Sender<PreampEvent>,
     state: Arc<Mutex<HashMap<u16, PreampState>>>,
+    pending_identify: PendingIdentify,
+    remote_ip: IpAddr,
+    cancel: CancellationToken,
 ) {
     tokio::spawn(async move {
         let mut parser = MidiStreamParser::default();
@@ -280,20 +331,30 @@ fn spawn_receive_loop(
         let mut buf = [0u8; 4096];
 
         loop {
-            let len = match read_half.read(&mut buf).await {
-                Ok(0) => {
-                    debug!(device = %id, "AHM TCP connection closed");
-                    return;
-                }
-                Ok(len) => len,
-                Err(e) => {
-                    warn!(device = %id, error = %e, "AHM TCP read failed, stopping receive loop");
-                    return;
-                }
+            let len = tokio::select! {
+                _ = cancel.cancelled() => return,
+                result = read_half.read(&mut buf) => match result {
+                    Ok(0) => {
+                        debug!(device = %id, "AHM TCP connection closed");
+                        return;
+                    }
+                    Ok(len) => len,
+                    Err(e) => {
+                        warn!(device = %id, error = %e, "AHM TCP read failed, stopping receive loop");
+                        return;
+                    }
+                },
             };
             parser.push(&buf[..len]);
 
             while let Some(msg) = parser.next_message() {
+                if let Some(info) = parse_identify_reply(&msg, remote_ip) {
+                    if let Some(sender) = pending_identify.lock().unwrap().take() {
+                        let _ = sender.send(info);
+                    }
+                    continue;
+                }
+
                 let Some((n, ch, param, value)) = tracker.feed(&msg) else {
                     continue;
                 };
@@ -452,5 +513,82 @@ mod tests {
             .unwrap();
         assert_eq!(event.address, PreampAddress::new("ahm-1", 1));
         assert!(event.state.phantom);
+    }
+
+    #[test]
+    fn parse_identify_reply_requires_ahm_header_and_name_reply_opcode() {
+        let addr: IpAddr = "10.0.0.5".parse().unwrap();
+
+        let mut good = SYSEX_HEADER.to_vec();
+        good.extend_from_slice(&[0x00, OP_NAME_REPLY, 0x00, b'F', b'O', b'H', 0xF7]);
+        let info = parse_identify_reply(&good, addr).unwrap();
+        assert_eq!(info.vendor, "Allen & Heath (AHM)");
+
+        // dLive's header (byte 5 = 0x10, not AHM's 0x12) must not match.
+        let mut wrong_header = good.clone();
+        wrong_header[5] = 0x10;
+        assert!(parse_identify_reply(&wrong_header, addr).is_none());
+
+        // Right header, wrong opcode (e.g. a gain update, not a name reply).
+        let mut wrong_opcode = SYSEX_HEADER.to_vec();
+        wrong_opcode.extend_from_slice(&[0x00, 0x0B, 0x19, 0x40, 0xF7]);
+        assert!(parse_identify_reply(&wrong_opcode, addr).is_none());
+    }
+
+    #[tokio::test]
+    async fn identify_resolves_from_channel_name_reply() {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let mut adapter = AhmAdapter::new("ahm-1", addr);
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+
+            let mut expected = SYSEX_HEADER.to_vec();
+            expected.extend_from_slice(&[0x00, OP_GET_NAME, 0x00, 0xF7]);
+            let mut buf = vec![0u8; expected.len()];
+            socket.read_exact(&mut buf).await.unwrap();
+            assert_eq!(buf, expected);
+
+            let mut reply = SYSEX_HEADER.to_vec();
+            reply.extend_from_slice(&[0x00, OP_NAME_REPLY, 0x00, b'F', b'O', b'H', 0xF7]);
+            socket.write_all(&reply).await.unwrap();
+        });
+
+        adapter.connect().await.unwrap();
+        let info = adapter.identify().await.unwrap();
+        assert_eq!(info.vendor, "Allen & Heath (AHM)");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn disconnect_stops_the_receive_loop() {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let mut adapter = AhmAdapter::new("ahm-1", addr);
+        let mut events = adapter.subscribe();
+
+        let server = tokio::spawn(async move { listener.accept().await.unwrap().0 });
+
+        adapter.connect().await.unwrap();
+        let mut socket = server.await.unwrap();
+
+        adapter.disconnect().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await; // let the loop actually exit
+
+        // Spontaneous phantom-on push for channel 1, as the unit would send.
+        socket
+            .write_all(&[0xB0, 0x63, 0x00, 0xB0, 0x62, 0x1B, 0xB0, 0x06, 0x7F])
+            .await
+            .unwrap();
+
+        let result = tokio::time::timeout(Duration::from_millis(200), events.recv()).await;
+        assert!(result.is_err(), "must not receive events after disconnect");
     }
 }

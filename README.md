@@ -47,7 +47,10 @@ preamp UI can control it directly). Today the bridge is a translating
 router you configure by IP/channel — genuinely useful, but not yet
 "invisible" to the consoles. This needs real hardware to build safely,
 since it means impersonating a device's discovery/pairing handshake
-closely enough that real gear accepts it.
+closely enough that real gear accepts it. The patch-bay web UI (below)
+already lets you declare **virtual** devices — placeholders for this
+emulation layer — and map them against real devices now, so the intended
+topology can be designed ahead of the emulation itself existing.
 
 Building that requires packet captures of a real console paired with its
 own native device (e.g. a real Yamaha QL1 talking to a real Rio/Tio, not
@@ -65,11 +68,12 @@ inline bridge:
 ```
 crates/
 ├── core/                    # shared AdapterError/DeviceInfo + preamp Router/types
-├── discovery/                # mDNS-based Dante device discovery
+├── discovery/                # mDNS-based Dante device discovery + Dante's own routing-observation protocol
 ├── preamp-adapter-osc/        # X32-family + Wing (Behringer/Midas OSC dialects)
 ├── preamp-adapter-ah/         # AHM TCP/IP + dLive MIDI-over-TCP (Allen & Heath)
 ├── preamp-adapter-yamaha/     # DM3 OSC
-└── preamp-cli/                # `preamp-bridge` binary: discover, run, config, hot-reload
+├── preamp-web/                # Patch-bay web UI + device/mapping management API (axum)
+└── preamp-cli/                # `preamp-bridge` binary: discover, init, run, config, hot-reload
 ```
 
 Each adapter implements `core::DeviceAdapter` (connect, set_gain,
@@ -83,19 +87,93 @@ between bidirectionally-mapped devices.
 
 ```sh
 cargo build --workspace
-cargo test --workspace     # 45 tests (both domains), all against mock devices - no hardware required
+cargo test --workspace     # 100 tests (both domains), all against mock devices - no hardware required
 
 # Browse Dante's mDNS advertisements for devices on the LAN
 cargo run --bin preamp-bridge -- discover
 
+# Auto-generate the [[device]] blocks of a bridge.toml by discovering
+# devices and probing each one against every implemented adapter's
+# identify() until one claims it. [[mapping]] entries are NOT generated
+# by default - add those by hand afterwards, or see --infer-mappings below.
+cargo run --bin preamp-bridge -- init --output bridge.toml
+
 # Run the bridge daemon
-cp bridge.example.toml bridge.toml   # edit for your rig
+cp bridge.example.toml bridge.toml   # edit for your rig, or use the init command above
 cargo run --bin preamp-bridge -- run --config bridge.toml
 ```
 
+`init`'s device-identification confidence varies by protocol: X32-family
+and Wing both confirm vendor *and* model (from documented `/info`/`/?`
+replies); AHM and dLive confirm protocol family only (their specs have no
+model-string query); DM3 is weakest-signal, since its spec documents no
+identify query at all and this reuses a scene-status request as a
+presence probe. See each adapter's `identify()` for details.
+
+### Auto-generating `[[mapping]]` entries (`--infer-mappings`)
+
+```sh
+cargo run --bin preamp-bridge -- init --output bridge.toml --infer-mappings
+```
+
+Dante carries its own audio-routing/subscription protocol, separate from
+every vendor's preamp-control protocol this bridge speaks elsewhere (see
+`crates/discovery/src/dante_control.rs`). With this flag, `init` also
+queries each identified device's current RX channel subscriptions and,
+for every subscription pointing at another device already in the
+generated `bridge.toml`, writes a `[[mapping]]` entry for it.
+
+This is a real signal — it comes from watching live patching, not a
+guess — but it comes with one real caveat: the channel numbers it writes
+are *Dante audio channel numbers*. Whether that's the same as the
+preamp/headamp channel number a vendor adapter addresses is a
+default-configuration convention on most gear (Dante channel order
+mirrors physical I/O order 1:1 out of the box), not a protocol
+guarantee — a console with customized Dante patching can break this
+assumption silently. That's why it's opt-in rather than the default, and
+why the written file gets a header comment calling this out explicitly.
+Treat inferred mappings as a first draft to verify against each
+adapter's channel numbering, not a final answer.
+
 Editing `bridge.toml` while the bridge is running hot-reloads the mapping
-table (not the device list — adding or removing a device still needs a
-restart).
+table. The device list itself is no longer restart-only either: the
+patch-bay web UI (below) can add and remove devices (real or virtual) and
+mappings, all live.
+
+## Preamp Control — Patch-bay web UI
+
+`run` also serves a web UI, bound by default to `0.0.0.0:8080` so anyone
+on the LAN can reach it at `http://<this-machine's-IP>:8080` - no
+separate app to install, just a browser, from any device on the network.
+Change the bind with `--web-bind` (e.g. `--web-bind 127.0.0.1:8080` to
+restrict it to this machine only), or turn it off entirely with
+`--no-web`. Like the rest of this bridge, there's no auth or TLS - same
+trust model as a hardware router's control port, meant for a trusted
+operations network, not the open internet.
+
+- **Patch tab** — every device drawn as a line-art rack strip with
+  numbered channel jacks, sources on the left and destinations on the
+  right (like a hardware patch-bay screen). Click a source channel then a
+  destination channel to connect them; click the patch cable to
+  disconnect.
+- **Crosspoint tab** — the same mappings as a matrix, scoped to channels
+  that are actually mapped (a full all-channels grid across even two
+  devices would be tens of thousands of cells). Pin a device to bring all
+  its channels into the grid on demand.
+- **Device management** — add real devices (connects immediately, same
+  as a config-declared one) or **virtual** devices: placeholders for the
+  not-yet-built emulation layer, with a chosen channel count and no live
+  connection, so a mapping topology can be designed before the emulation
+  exists to back it.
+- **Export as TOML** — since devices/mappings added through the UI are
+  in-memory only (they don't survive a restart, matching how this
+  project's config hot-reload has always worked), a button exports the
+  current state so it can be pasted into `bridge.toml` to keep it.
+
+Removing a real device calls its adapter's `disconnect()` (cancellation
+token torn down through the background socket task, port actually
+freed), not just a drop from a list - every adapter implements this, so
+add/remove works the same way whether a device is real or virtual.
 
 ## Preamp Control — Config format
 
@@ -109,6 +187,12 @@ kind = "ah-tcp"        # osc-x32 | osc-wing | ah-tcp | dlive-tcp | yamaha-dm3
 address = "10.0.0.10"
 port = 51325            # optional, defaults to the protocol's standard port
 
+[[device]]
+id = "future-x32"
+kind = "osc-x32"        # the protocol this virtual device will eventually emulate
+virtual = true          # placeholder for the not-yet-built emulation layer - no address needed
+channels = 8            # required when there's no documented default for `kind` (or to override it)
+
 [[mapping]]
 from = { device = "ahm-rack", channel = 3 }
 to   = { device = "x32-monitors", channel = 7 }
@@ -118,7 +202,10 @@ bidirectional = true
 `channel` means whatever the underlying protocol's native addressing
 unit is — an X32 headamp number, a dLive physical preamp Socket number
 (distinct from processing channel), a DM3 Local Input number, etc. See
-the relevant adapter's module doc comment for exact ranges.
+the relevant adapter's module doc comment for exact ranges. `address` is
+required for every non-virtual device; `channels` is optional for real
+devices (defaults to the kind's documented channel count) and required
+for kinds with none documented (`ah-midi`, `yamaha`).
 
 ## Radio Mic Telemetry — Status
 

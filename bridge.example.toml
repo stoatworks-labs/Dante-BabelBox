@@ -13,6 +13,11 @@
 #
 # "ah-midi" (Qu/SQ) and "yamaha" (CL/QL/DM7, Rio/Tio) are not implemented
 # yet - see the project task list for why.
+#
+# The [[mapping]] entries below were written by hand. `preamp-bridge init
+# --infer-mappings` can generate a first draft of these by observing live
+# Dante audio routing instead - see the README's "Auto-generating
+# bridge.toml" section for the caveat that comes with trusting them.
 
 [[device]]
 id = "ahm-rack"

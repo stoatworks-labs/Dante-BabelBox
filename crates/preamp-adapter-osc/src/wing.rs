@@ -31,8 +31,8 @@
 //! leading fields than expected.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -41,7 +41,8 @@ use dante_babelbox_core::{
 };
 use rosc::{OscMessage, OscPacket, OscType};
 use tokio::net::UdpSocket;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, oneshot, Mutex};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 pub struct WingAdapter {
@@ -50,6 +51,8 @@ pub struct WingAdapter {
     socket: Option<Arc<UdpSocket>>,
     tx: broadcast::Sender<PreampEvent>,
     state: Arc<Mutex<HashMap<u16, PreampState>>>,
+    pending_identify: Arc<StdMutex<Option<oneshot::Sender<DeviceInfo>>>>,
+    cancel: CancellationToken,
 }
 
 impl WingAdapter {
@@ -61,6 +64,8 @@ impl WingAdapter {
             socket: None,
             tx,
             state: Arc::new(Mutex::new(HashMap::new())),
+            pending_identify: Arc::new(StdMutex::new(None)),
+            cancel: CancellationToken::new(),
         }
     }
 
@@ -112,19 +117,28 @@ impl DeviceAdapter for WingAdapter {
             Arc::clone(&self.id),
             self.tx.clone(),
             Arc::clone(&self.state),
+            Arc::clone(&self.pending_identify),
+            self.remote.ip(),
+            self.cancel.clone(),
         );
-        spawn_subscription_renewal(Arc::clone(&socket));
+        spawn_subscription_renewal(Arc::clone(&socket), self.cancel.clone());
 
         Ok(())
     }
 
+    async fn disconnect(&mut self) -> AdapterResult<()> {
+        self.cancel.cancel();
+        Ok(())
+    }
+
     async fn identify(&mut self) -> AdapterResult<DeviceInfo> {
-        // Same gap as the X32 adapter: WING's "/?" reply carries name/model
-        // info, but answering it needs a one-shot request/reply path this
-        // receive-loop design doesn't have yet.
-        Err(AdapterError::Protocol(
-            "identify: /? reply handling not yet implemented".into(),
-        ))
+        let (tx, rx) = oneshot::channel();
+        *self.pending_identify.lock().unwrap() = Some(tx);
+        self.send("/?", vec![]).await?;
+        tokio::time::timeout(Duration::from_secs(2), rx)
+            .await
+            .map_err(|_| AdapterError::Protocol("identify: timed out waiting for /? reply".into()))?
+            .map_err(|_| AdapterError::Protocol("identify: reply channel dropped".into()))
     }
 
     async fn set_gain(&mut self, channel: u16, gain_db: f32) -> AdapterResult<()> {
@@ -188,24 +202,34 @@ fn last_numeric_value(args: &[OscType]) -> Option<f32> {
     })
 }
 
+type PendingIdentify = Arc<StdMutex<Option<oneshot::Sender<DeviceInfo>>>>;
+
 fn spawn_receive_loop(
     socket: Arc<UdpSocket>,
     id: Arc<str>,
     tx: broadcast::Sender<PreampEvent>,
     state: Arc<Mutex<HashMap<u16, PreampState>>>,
+    pending_identify: PendingIdentify,
+    remote_ip: IpAddr,
+    cancel: CancellationToken,
 ) {
     tokio::spawn(async move {
         let mut buf = [0u8; 8192];
         loop {
-            let len = match socket.recv(&mut buf).await {
-                Ok(len) => len,
-                Err(e) => {
-                    warn!(device = %id, error = %e, "WING OSC socket read failed, stopping receive loop");
-                    return;
-                }
+            let len = tokio::select! {
+                _ = cancel.cancelled() => return,
+                result = socket.recv(&mut buf) => match result {
+                    Ok(len) => len,
+                    Err(e) => {
+                        warn!(device = %id, error = %e, "WING OSC socket read failed, stopping receive loop");
+                        return;
+                    }
+                },
             };
             match rosc::decoder::decode_udp(&buf[..len]) {
-                Ok((_, OscPacket::Message(msg))) => handle_message(msg, &id, &tx, &state).await,
+                Ok((_, OscPacket::Message(msg))) => {
+                    handle_message(msg, &id, &tx, &state, &pending_identify, remote_ip).await
+                }
                 Ok((_, OscPacket::Bundle(_))) => {
                     debug!(device = %id, "ignoring unexpected OSC bundle (WING doesn't send these)");
                 }
@@ -215,12 +239,42 @@ fn spawn_receive_loop(
     });
 }
 
+/// Parses the `/?` reply: single string `"WING,<ip>,<name>,<model>,<serial>,<firmware>"`
+/// (from the official WING OSC PDF's "WING OSC Messages" section).
+fn parse_info_reply(msg: &OscMessage, address: IpAddr) -> Option<DeviceInfo> {
+    if msg.addr != "/?" {
+        return None;
+    }
+    let OscType::String(s) = msg.args.first()? else {
+        return None;
+    };
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.first() != Some(&"WING") {
+        return None;
+    }
+    let model = parts.get(3)?.to_string();
+    Some(DeviceInfo {
+        vendor: "Behringer".to_string(),
+        model,
+        address,
+    })
+}
+
 async fn handle_message(
     msg: OscMessage,
     id: &Arc<str>,
     tx: &broadcast::Sender<PreampEvent>,
     state: &Arc<Mutex<HashMap<u16, PreampState>>>,
+    pending_identify: &PendingIdentify,
+    remote_ip: IpAddr,
 ) {
+    if let Some(info) = parse_info_reply(&msg, remote_ip) {
+        if let Some(sender) = pending_identify.lock().unwrap().take() {
+            let _ = sender.send(info);
+        }
+        return;
+    }
+
     let Some((channel, field)) = parse_headamp_addr(&msg.addr) else {
         return;
     };
@@ -249,7 +303,7 @@ async fn handle_message(
     });
 }
 
-fn spawn_subscription_renewal(socket: Arc<UdpSocket>) {
+fn spawn_subscription_renewal(socket: Arc<UdpSocket>, cancel: CancellationToken) {
     tokio::spawn(async move {
         loop {
             let packet = OscPacket::Message(OscMessage {
@@ -266,7 +320,10 @@ fn spawn_subscription_renewal(socket: Arc<UdpSocket>) {
                 Err(e) => warn!(error = ?e, "failed to encode WING subscription request"),
             }
             // Subscriptions expire after 10s per the spec; renew with margin.
-            tokio::time::sleep(Duration::from_secs(8)).await;
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = tokio::time::sleep(Duration::from_secs(8)) => {}
+            }
         }
     });
 }
@@ -315,5 +372,78 @@ mod tests {
             OscType::Int(1),
         ];
         assert_eq!(last_numeric_value(&mute_like), Some(1.0));
+    }
+
+    #[test]
+    fn parse_info_reply_extracts_model_from_csv_string() {
+        let msg = OscMessage {
+            addr: "/?".to_string(),
+            args: vec![OscType::String(
+                "WING,192.168.1.71,PGM,ngc-full,NO_SERIAL,1.07.2-40-g1b1b292b:develop".into(),
+            )],
+        };
+        let info = parse_info_reply(&msg, "10.0.0.5".parse().unwrap()).unwrap();
+        assert_eq!(info.vendor, "Behringer");
+        assert_eq!(info.model, "ngc-full");
+    }
+
+    #[tokio::test]
+    async fn identify_resolves_from_question_mark_reply() {
+        let mock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mock_addr = mock.local_addr().unwrap();
+
+        let mut adapter = WingAdapter::new("wing-1", mock_addr);
+        adapter.connect().await.unwrap();
+
+        let server = tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            loop {
+                let (len, from) = mock.recv_from(&mut buf).await.unwrap();
+                let (_, packet) = rosc::decoder::decode_udp(&buf[..len]).unwrap();
+                if let OscPacket::Message(m) = &packet {
+                    if m.addr == "/?" {
+                        let reply = OscPacket::Message(OscMessage {
+                            addr: "/?".to_string(),
+                            args: vec![OscType::String("WING,10.0.0.5,PGM,ngc-full,NO_SERIAL,1.0".into())],
+                        });
+                        let bytes = rosc::encoder::encode(&reply).unwrap();
+                        mock.send_to(&bytes, from).await.unwrap();
+                        return;
+                    }
+                }
+                // Otherwise it was the /*s subscription renewal - keep waiting.
+            }
+        });
+
+        let info = adapter.identify().await.unwrap();
+        assert_eq!(info.vendor, "Behringer");
+        assert_eq!(info.model, "ngc-full");
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn disconnect_stops_the_receive_loop() {
+        let mock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        let mut adapter = WingAdapter::new("wing-1", mock.local_addr().unwrap());
+        adapter.connect().await.unwrap();
+        let mut events = adapter.subscribe();
+
+        // Learn the adapter's ephemeral port from its /*s subscription renewal.
+        let mut buf = [0u8; 512];
+        let (_, from) = mock.recv_from(&mut buf).await.unwrap();
+
+        adapter.disconnect().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await; // let the loop actually exit
+
+        let packet = rosc::encoder::encode(&OscPacket::Message(OscMessage {
+            addr: "/io/in/LCL/1/g".to_string(),
+            args: vec![OscType::Float(10.0)],
+        }))
+        .unwrap();
+        mock.send_to(&packet, from).await.unwrap();
+
+        let result = tokio::time::timeout(Duration::from_millis(200), events.recv()).await;
+        assert!(result.is_err(), "must not receive events after disconnect");
     }
 }

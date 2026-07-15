@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dante Preamp Bridge — Patch Bay</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 2rem;
+    background: #14161a; color: #e6e6e6;
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 1.1rem; font-weight: 600; color: #9fb4ff; margin: 0 0 1.25rem; }
+  h2 { font-size: 0.85rem; font-weight: 600; color: #b7bfca; margin: 0 0 0.6rem; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .toolbar { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; }
+  #export-btn {
+    font-size: 0.78rem; color: #b7bfca; background: #1c1f26; border: 1px solid #2a2d33;
+    border-radius: 4px; padding: 0.3rem 0.6rem; cursor: pointer;
+  }
+  #export-btn:hover { background: #22262e; }
+
+  #tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid #2a2d33; }
+  .tab-btn {
+    background: transparent; border: none; color: #8a8f98; padding: 0.5rem 1rem;
+    font-size: 0.85rem; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  .tab-btn.active { color: #9fb4ff; border-bottom-color: #9fb4ff; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* --- Patch tab --- */
+  #patch-stage { position: relative; }
+  #patch-lines { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+  #patch-lines path { pointer-events: stroke; cursor: pointer; }
+  #patch-columns { display: flex; justify-content: space-between; gap: 4rem; position: relative; z-index: 1; }
+  .column { flex: 1; min-width: 0; max-width: 22rem; }
+
+  .device-card { background: #1a1d24; border: 1px solid #2a2d33; border-radius: 8px; margin-bottom: 1rem; overflow: hidden; }
+  .device-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.5rem 0.75rem; background: #1c1f26; border-bottom: 1px solid #2a2d33;
+  }
+  .device-title { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; font-weight: 600; }
+  .kind-badge {
+    font-size: 0.6rem; font-weight: 600; color: #8a8f98; background: #22262e;
+    border-radius: 3px; padding: 0.05rem 0.3rem; text-transform: uppercase;
+  }
+  .virtual-badge {
+    font-size: 0.6rem; font-weight: 600; color: #f2c14e; background: #332b12;
+    border-radius: 3px; padding: 0.05rem 0.3rem; text-transform: uppercase;
+  }
+  .device-remove { border: none; background: transparent; color: #6b7280; cursor: pointer; font-size: 0.9rem; border-radius: 3px; padding: 0.1rem 0.3rem; }
+  .device-remove:hover:not([disabled]) { background: #4a2020; color: #ff9b9b; }
+  .device-remove[disabled] { color: #454a52; cursor: not-allowed; }
+  .device-rack { padding: 0.4rem 0; max-height: 14rem; overflow-y: auto; }
+  .jack-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0.75rem; font-size: 0.75rem; color: #b7bfca; cursor: pointer; }
+  .jack-row:hover { background: #22262e; }
+  .jack-row.empty { color: #565b64; cursor: default; }
+  .jack-row.empty:hover { background: transparent; }
+  .jack { width: 0.7rem; height: 0.7rem; border-radius: 50%; border: 1.5px solid #565b64; background: #101216; flex-shrink: 0; }
+  .jack.armed { border-color: #f2c14e; background: #f2c14e; box-shadow: 0 0 0 3px rgba(242, 193, 78, 0.25); }
+  .jack.connected { border-color: #37835c; background: #2f6f4f; }
+  .column.sources .jack-row { flex-direction: row-reverse; text-align: right; }
+
+  #add-device-area { margin-top: 0.5rem; }
+  .add-btn {
+    font-size: 0.78rem; color: #9fb4ff; background: #1c2333; border: 1px solid #2c3550;
+    border-radius: 4px; padding: 0.3rem 0.6rem; cursor: pointer;
+  }
+  .add-btn:hover { background: #232c44; }
+  .add-form {
+    background: #1a1d24; border: 1px solid #2a2d33; border-radius: 6px;
+    padding: 0.8rem; margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.6rem; max-width: 26rem;
+  }
+  .add-form.hidden { display: none; }
+  .add-form input, .add-form select {
+    background: #101216; border: 1px solid #2a2d33; color: #e6e6e6;
+    border-radius: 4px; padding: 0.4rem 0.5rem; font-size: 0.85rem; font-family: inherit;
+  }
+  .add-form label { font-size: 0.72rem; color: #8a8f98; display: flex; flex-direction: column; gap: 0.25rem; }
+  .add-form label.checkbox { flex-direction: row; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: #e6e6e6; }
+  .add-form label.checkbox input { width: auto; }
+  .add-form .row { display: flex; gap: 0.5rem; }
+  .add-form .row > * { flex: 1; }
+  .add-form .row.hidden { display: none; }
+  .add-form .hint { font-size: 0.72rem; color: #6b7280; margin: 0; }
+  .add-form .actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+  .add-form button[type="submit"] { background: #2f6f4f; border: none; color: #eafff2; border-radius: 4px; padding: 0.35rem 0.8rem; cursor: pointer; font-size: 0.82rem; }
+  .add-form button[type="submit"]:hover { background: #37835c; }
+  .add-form button.cancel { background: transparent; border: 1px solid #3a3f47; color: #b7bfca; border-radius: 4px; padding: 0.35rem 0.8rem; cursor: pointer; font-size: 0.82rem; }
+
+  /* --- Crosspoint tab --- */
+  #pin-device { margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+  #pin-device select { background: #101216; border: 1px solid #2a2d33; color: #e6e6e6; border-radius: 4px; padding: 0.3rem 0.5rem; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #2a2d33; padding: 0; min-width: 68px; height: 34px; text-align: center; }
+  th { background: #1c1f26; font-weight: 500; font-size: 0.7rem; padding: 0.3rem; white-space: nowrap; }
+  th.row-label { text-align: right; padding-right: 0.5rem; font-size: 0.7rem; }
+  td button.cell { width: 100%; height: 100%; border: none; background: transparent; color: #666; cursor: pointer; font-size: 1rem; }
+  td button.cell:hover { background: #22262e; }
+  td.active button.cell { background: #2f6f4f; color: #d4ffe6; font-weight: bold; }
+
+  #status { margin-top: 1rem; font-size: 0.8rem; color: #777; min-height: 1.2em; }
+  #disclaimer { margin-top: 2.5rem; font-size: 0.75rem; color: #565b64; max-width: 32rem; }
+</style>
+</head>
+<body>
+<h1>Dante Preamp Bridge — Patch Bay</h1>
+
+<div class="toolbar">
+  <button type="button" id="export-btn">Export current state as TOML</button>
+</div>
+
+<div id="tabs">
+  <button type="button" class="tab-btn active" data-tab="patch">Patch</button>
+  <button type="button" class="tab-btn" data-tab="crosspoint">Crosspoint</button>
+</div>
+
+<div id="patch-panel" class="tab-panel active">
+  <div id="patch-stage">
+    <svg id="patch-lines"></svg>
+    <div id="patch-columns">
+      <div class="column sources">
+        <h2>Sources</h2>
+        <div id="sources-list"><p>Loading…</p></div>
+      </div>
+      <div class="column destinations">
+        <h2>Destinations</h2>
+        <div id="destinations-list"><p>Loading…</p></div>
+      </div>
+    </div>
+  </div>
+  <div id="add-device-area">
+    <button type="button" class="add-btn" data-toggle="add-device-form">+ Add device</button>
+    <form id="add-device-form" class="add-form hidden">
+      <label>Id
+        <input name="id" placeholder="e.g. x32-foh" required>
+      </label>
+      <label>Kind
+        <select name="kind">
+          <option value="osc-x32">Behringer X32 / Midas M32 &amp; HD96 (osc-x32)</option>
+          <option value="osc-wing">Behringer Wing (osc-wing)</option>
+          <option value="ah-tcp">Allen &amp; Heath AHM (ah-tcp)</option>
+          <option value="dlive-tcp">Allen &amp; Heath dLive (dlive-tcp)</option>
+          <option value="yamaha-dm3">Yamaha DM3 (yamaha-dm3)</option>
+          <option value="ah-midi">Allen &amp; Heath Qu/SQ (ah-midi) — no adapter, virtual only</option>
+          <option value="yamaha">Yamaha CL/QL/DM7 (yamaha) — no adapter, virtual only</option>
+        </select>
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" name="is_virtual">
+        <span>Virtual — a placeholder for a future emulated device, no live connection</span>
+      </label>
+      <div class="row" data-real-fields>
+        <label>Address
+          <input name="address" placeholder="10.0.0.10">
+        </label>
+        <label>Port <span style="font-weight:400">(optional)</span>
+          <input name="port" type="number" min="1" max="65535" placeholder="default for kind">
+        </label>
+      </div>
+      <div class="row hidden" data-virtual-fields>
+        <label>Channels
+          <input name="channels" type="number" min="1" placeholder="e.g. 8">
+        </label>
+      </div>
+      <p class="hint">Real devices default to their kind's documented channel count if left blank; virtual devices (and kinds with no documented count) need one specified.</p>
+      <div class="actions">
+        <button type="button" class="cancel" data-toggle="add-device-form">Cancel</button>
+        <button type="submit">Add device</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="crosspoint-panel" class="tab-panel">
+  <div id="pin-device">
+    <label for="pin-select">Pin a device (show all its channels, even unmapped ones):</label>
+    <select id="pin-select"><option value="">— none —</option></select>
+  </div>
+  <div id="crosspoint-grid"><p>Loading…</p></div>
+</div>
+
+<div id="status"></div>
+<p id="disclaimer">AI-assisted project (built with Claude), reviewed by a human author. See the repo README for current verification status.</p>
+
+<script>
+// ---------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------
+let lastState = { devices: [], mappings: [] };
+let armedSource = null; // { device, channel } - armed from the Sources column
+let pinnedDevice = '';
+
+function setStatus(text) {
+  document.getElementById('status').textContent = text;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function cssEscape(s) {
+  return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&');
+}
+
+function mappingId(m) {
+  return `${m.from.device}:${m.from.channel}->${m.to.device}:${m.to.channel}`;
+}
+
+function sameEndpoint(a, b) {
+  return a.device === b.device && a.channel === b.channel;
+}
+
+// ---------------------------------------------------------------------
+// Fetch / render entry point
+// ---------------------------------------------------------------------
+async function fetchState() {
+  const res = await fetch('/api/state');
+  return res.json();
+}
+
+function render(state) {
+  lastState = state;
+  renderPatchTab(state);
+  renderCrosspointTab(state);
+  renderPinSelect(state);
+}
+
+// ---------------------------------------------------------------------
+// Patch tab
+// ---------------------------------------------------------------------
+function deviceCard(device, side) {
+  const kindBadge = `<span class="kind-badge">${escapeHtml(device.kind)}</span>`;
+  const virtualBadge = device.virtual ? '<span class="virtual-badge">virtual</span>' : '';
+  const channels = device.channels || 0;
+
+  let rows = '';
+  for (let ch = 1; ch <= channels; ch++) {
+    rows += `<div class="jack-row" data-device="${escapeHtml(device.id)}" data-channel="${ch}">
+      <span class="jack" data-jack="${side}:${escapeHtml(device.id)}:${ch}"></span>
+      <span>${ch}</span>
+    </div>`;
+  }
+  if (channels === 0) {
+    rows = '<div class="jack-row empty">no documented channel count</div>';
+  }
+
+  return `<div class="device-card">
+    <div class="device-header">
+      <div class="device-title">${escapeHtml(device.id)} ${kindBadge}${virtualBadge}</div>
+      <button type="button" class="device-remove" data-remove-device="${escapeHtml(device.id)}">×</button>
+    </div>
+    <div class="device-rack">${rows}</div>
+  </div>`;
+}
+
+function renderPatchTab(state) {
+  const sourcesList = document.getElementById('sources-list');
+  const destinationsList = document.getElementById('destinations-list');
+
+  if (state.devices.length === 0) {
+    sourcesList.innerHTML = '<p>No devices yet — add one below.</p>';
+    destinationsList.innerHTML = '<p>No devices yet — add one below.</p>';
+  } else {
+    sourcesList.innerHTML = state.devices.map((d) => deviceCard(d, 'src')).join('');
+    destinationsList.innerHTML = state.devices.map((d) => deviceCard(d, 'dst')).join('');
+  }
+
+  sourcesList.querySelectorAll('.jack-row:not(.empty)').forEach((row) => {
+    row.addEventListener('click', () => onSourceJackClick(row.dataset.device, Number(row.dataset.channel)));
+  });
+  destinationsList.querySelectorAll('.jack-row:not(.empty)').forEach((row) => {
+    row.addEventListener('click', () => onDestJackClick(row.dataset.device, Number(row.dataset.channel)));
+  });
+  [sourcesList, destinationsList].forEach((list) => {
+    list.querySelectorAll('[data-remove-device]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        removeDevice(btn.dataset.removeDevice);
+      });
+    });
+  });
+
+  updateJackHighlights();
+  drawPatchLines(state);
+}
+
+function onSourceJackClick(device, channel) {
+  const clicked = { device, channel };
+  armedSource = armedSource && sameEndpoint(armedSource, clicked) ? null : clicked;
+  updateJackHighlights();
+}
+
+async function onDestJackClick(device, channel) {
+  if (!armedSource) {
+    setStatus('Click a channel in Sources first, then a channel in Destinations to connect them.');
+    return;
+  }
+  const from = armedSource;
+  const to = { device, channel };
+  armedSource = null;
+  updateJackHighlights();
+  await addMapping(from, to);
+}
+
+function updateJackHighlights() {
+  document.querySelectorAll('.jack').forEach((el) => el.classList.remove('armed', 'connected'));
+
+  if (armedSource) {
+    const el = document.querySelector(`.jack[data-jack="src:${cssEscape(armedSource.device)}:${armedSource.channel}"]`);
+    if (el) el.classList.add('armed');
+  }
+
+  for (const m of lastState.mappings) {
+    markConnected('src', m.from);
+    markConnected('dst', m.to);
+    if (m.bidirectional) {
+      markConnected('src', m.to);
+      markConnected('dst', m.from);
+    }
+  }
+}
+
+function markConnected(side, endpoint) {
+  const el = document.querySelector(`.jack[data-jack="${side}:${cssEscape(endpoint.device)}:${endpoint.channel}"]`);
+  if (el) el.classList.add('connected');
+}
+
+function drawPatchLines(state) {
+  const svg = document.getElementById('patch-lines');
+  const stage = document.getElementById('patch-stage');
+  const stageRect = stage.getBoundingClientRect();
+  svg.setAttribute('width', stageRect.width);
+  svg.setAttribute('height', stageRect.height);
+  svg.setAttribute('viewBox', `0 0 ${stageRect.width} ${stageRect.height}`);
+
+  let paths = '';
+  for (const m of state.mappings) {
+    const srcEl = document.querySelector(`.jack[data-jack="src:${cssEscape(m.from.device)}:${m.from.channel}"]`);
+    const dstEl = document.querySelector(`.jack[data-jack="dst:${cssEscape(m.to.device)}:${m.to.channel}"]`);
+    if (!srcEl || !dstEl) continue; // endpoint scrolled out of its rack's visible list, or device gone
+
+    const a = srcEl.getBoundingClientRect();
+    const b = dstEl.getBoundingClientRect();
+    const x1 = a.left + a.width / 2 - stageRect.left;
+    const y1 = a.top + a.height / 2 - stageRect.top;
+    const x2 = b.left + b.width / 2 - stageRect.left;
+    const y2 = b.top + b.height / 2 - stageRect.top;
+    const midX = (x1 + x2) / 2;
+
+    paths += `<path d="M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}"
+      fill="none" stroke="#37835c" stroke-width="2" data-remove-mapping="${escapeHtml(mappingId(m))}"></path>`;
+  }
+  svg.innerHTML = paths;
+  svg.querySelectorAll('path').forEach((p) => {
+    p.addEventListener('click', () => removeMapping(p.dataset.removeMapping));
+  });
+}
+
+window.addEventListener('resize', () => drawPatchLines(lastState));
+
+// ---------------------------------------------------------------------
+// Crosspoint tab (mapped-only grid, with an optional pinned device)
+// ---------------------------------------------------------------------
+function renderPinSelect(state) {
+  const select = document.getElementById('pin-select');
+  const current = select.value;
+  select.innerHTML = '<option value="">— none —</option>' +
+    state.devices.map((d) => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.id)}</option>`).join('');
+  select.value = state.devices.some((d) => d.id === current) ? current : '';
+  pinnedDevice = select.value;
+}
+
+document.getElementById('pin-select').addEventListener('change', (ev) => {
+  pinnedDevice = ev.target.value;
+  renderCrosspointTab(lastState);
+});
+
+function crosspointEndpoints(state) {
+  const seen = new Map();
+  const add = (device, channel) => seen.set(`${device}:${channel}`, { device, channel });
+  for (const m of state.mappings) {
+    add(m.from.device, m.from.channel);
+    add(m.to.device, m.to.channel);
+  }
+  if (pinnedDevice) {
+    const dev = state.devices.find((d) => d.id === pinnedDevice);
+    if (dev && dev.channels) {
+      for (let ch = 1; ch <= dev.channels; ch++) add(dev.id, ch);
+    }
+  }
+  const endpoints = Array.from(seen.values());
+  endpoints.sort((a, b) => (a.device === b.device ? a.channel - b.channel : a.device.localeCompare(b.device)));
+  return endpoints;
+}
+
+function findMapping(state, from, to) {
+  return state.mappings.find((m) =>
+    (sameEndpoint(m.from, from) && sameEndpoint(m.to, to)) ||
+    (m.bidirectional && sameEndpoint(m.from, to) && sameEndpoint(m.to, from))
+  );
+}
+
+function renderCrosspointTab(state) {
+  const grid = document.getElementById('crosspoint-grid');
+  const endpoints = crosspointEndpoints(state);
+  if (endpoints.length === 0) {
+    grid.innerHTML = '<p>No mappings yet — build some on the Patch tab, or pin a device above.</p>';
+    return;
+  }
+
+  let html = '<table><thead><tr><th></th>';
+  for (const src of endpoints) {
+    html += `<th>${escapeHtml(src.device)}:${src.channel}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+  for (const dst of endpoints) {
+    html += `<tr><th class="row-label">${escapeHtml(dst.device)}:${dst.channel}</th>`;
+    for (const src of endpoints) {
+      if (sameEndpoint(dst, src)) {
+        html += '<td style="background:#101216"></td>';
+        continue;
+      }
+      const mapping = findMapping(state, src, dst);
+      html += `<td class="${mapping ? 'active' : ''}"><button class="cell"
+        data-from-device="${escapeHtml(src.device)}" data-from-channel="${src.channel}"
+        data-to-device="${escapeHtml(dst.device)}" data-to-channel="${dst.channel}">${mapping ? '●' : ''}</button></td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  grid.innerHTML = html;
+
+  grid.querySelectorAll('button.cell').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const from = { device: btn.dataset.fromDevice, channel: Number(btn.dataset.fromChannel) };
+      const to = { device: btn.dataset.toDevice, channel: Number(btn.dataset.toChannel) };
+      const existing = findMapping(state, from, to);
+      if (existing) {
+        await removeMapping(mappingId(existing));
+      } else {
+        await addMapping(from, to);
+      }
+    });
+  });
+}
+
+// ---------------------------------------------------------------------
+// Mutations (devices + mappings)
+// ---------------------------------------------------------------------
+async function addMapping(from, to) {
+  const res = await fetch('/api/mappings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, to, bidirectional: true }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    setStatus(`Failed to add mapping: ${body.error || res.status}`);
+    return;
+  }
+  setStatus('');
+  render(await fetchState());
+}
+
+async function removeMapping(id) {
+  const res = await fetch(`/api/mappings/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    setStatus(`Failed to remove mapping: ${body.error || res.status}`);
+    return;
+  }
+  setStatus('');
+  render(await fetchState());
+}
+
+async function removeDevice(id) {
+  if (!confirm(`Remove device '${id}'?`)) return;
+  const res = await fetch(`/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    setStatus(`Failed to remove device: ${body.error || res.status}`);
+    return;
+  }
+  setStatus('');
+  render(await fetchState());
+}
+
+// ---------------------------------------------------------------------
+// Add-device form
+// ---------------------------------------------------------------------
+document.querySelectorAll('[data-toggle]').forEach((el) => {
+  el.addEventListener('click', () => {
+    document.getElementById(el.dataset.toggle).classList.toggle('hidden');
+  });
+});
+
+const virtualCheckbox = document.querySelector('#add-device-form input[name="is_virtual"]');
+const realFieldsRow = document.querySelector('#add-device-form [data-real-fields]');
+const virtualFieldsRow = document.querySelector('#add-device-form [data-virtual-fields]');
+virtualCheckbox.addEventListener('change', () => {
+  realFieldsRow.classList.toggle('hidden', virtualCheckbox.checked);
+  virtualFieldsRow.classList.toggle('hidden', !virtualCheckbox.checked);
+});
+
+document.getElementById('add-device-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const form = ev.target;
+  const data = new FormData(form);
+  const isVirtual = data.get('is_virtual') === 'on';
+
+  const body = { id: data.get('id'), kind: data.get('kind'), virtual: isVirtual };
+  if (isVirtual) {
+    const channels = data.get('channels');
+    if (channels) body.channels = Number(channels);
+  } else {
+    body.address = data.get('address');
+    const port = data.get('port');
+    if (port) body.port = Number(port);
+  }
+
+  const res = await fetch('/api/devices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    setStatus(`Add device failed: ${err.error || res.status}`);
+    return;
+  }
+  form.reset();
+  form.classList.add('hidden');
+  realFieldsRow.classList.remove('hidden');
+  virtualFieldsRow.classList.add('hidden');
+  setStatus('');
+  render(await fetchState());
+});
+
+// ---------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------
+document.querySelectorAll('.tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`${btn.dataset.tab}-panel`).classList.add('active');
+    if (btn.dataset.tab === 'patch') drawPatchLines(lastState);
+  });
+});
+
+// ---------------------------------------------------------------------
+// Export as TOML (client-side only - Phase 1 state is in-memory, so
+// this is the way to make a UI-built topology durable across a restart)
+// ---------------------------------------------------------------------
+function exportAsToml(state) {
+  let out = '# Exported from the patch-bay web UI - paste into bridge.toml to persist across a restart.\n\n';
+  for (const d of state.devices) {
+    out += '[[device]]\n';
+    out += `id = "${d.id}"\n`;
+    out += `kind = "${d.kind}"\n`;
+    if (d.virtual) out += 'virtual = true\n';
+    if (d.address) out += `address = "${d.address}"\n`;
+    if (d.port) out += `port = ${d.port}\n`;
+    if (d.channels) out += `channels = ${d.channels}\n`;
+    out += '\n';
+  }
+  for (const m of state.mappings) {
+    out += '[[mapping]]\n';
+    out += `from = { device = "${m.from.device}", channel = ${m.from.channel} }\n`;
+    out += `to   = { device = "${m.to.device}", channel = ${m.to.channel} }\n`;
+    out += `bidirectional = ${m.bidirectional}\n\n`;
+  }
+  return out;
+}
+
+document.getElementById('export-btn').addEventListener('click', () => {
+  const blob = new Blob([exportAsToml(lastState)], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'bridge-export.toml';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// ---------------------------------------------------------------------
+// Live updates: first paint over plain REST, then upgrade to websocket
+// ---------------------------------------------------------------------
+async function tick() {
+  try {
+    render(await fetchState());
+  } catch (e) {
+    setStatus('Failed to reach bridge: ' + e);
+  }
+}
+
+const RECONNECT_DELAY_MS = 2000;
+function connectLive() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.addEventListener('open', () => setStatus(''));
+  ws.addEventListener('message', (ev) => render(JSON.parse(ev.data)));
+  ws.addEventListener('close', () => {
+    setStatus('Disconnected, retrying…');
+    setTimeout(connectLive, RECONNECT_DELAY_MS);
+  });
+  ws.addEventListener('error', () => ws.close());
+}
+
+tick().finally(connectLive);
+</script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -5,6 +6,8 @@ use clap::{Parser, Subcommand};
 
 mod config;
 mod daemon;
+mod init;
+mod ports;
 
 #[derive(Parser)]
 #[command(name = "preamp-bridge", version, about = "Cross-vendor Dante preamp control bridge")]
@@ -24,6 +27,36 @@ enum Command {
     Run {
         #[arg(long, default_value = "bridge.toml")]
         config: PathBuf,
+        /// Address to serve the patch-bay web UI on. Defaults to all
+        /// interfaces so anyone on the LAN can reach it - same trust
+        /// model as a hardware router's control port (no auth, no TLS;
+        /// meant for a trusted operations network). Use 127.0.0.1:PORT
+        /// to restrict it to this machine only.
+        #[arg(long, default_value = "0.0.0.0:8080")]
+        web_bind: SocketAddr,
+        /// Don't serve the patch-bay web UI at all.
+        #[arg(long)]
+        no_web: bool,
+    },
+    /// Discover devices and auto-generate the [[device]] blocks of a
+    /// bridge.toml. [[mapping]] entries must still be added by hand,
+    /// unless --infer-mappings is passed.
+    Init {
+        #[arg(long, default_value = "bridge.toml")]
+        output: PathBuf,
+        #[arg(long, default_value_t = 5)]
+        timeout_secs: u64,
+        /// Overwrite an existing output file.
+        #[arg(long)]
+        force: bool,
+        /// Also guess [[mapping]] entries by observing live Dante audio
+        /// routing. A real signal, not a guess, but the resulting channel
+        /// numbers are Dante audio channel numbers, which only
+        /// conventionally (not necessarily) match a device's preamp
+        /// channel numbers - verify before trusting. See the written
+        /// file's header comment when this is set.
+        #[arg(long)]
+        infer_mappings: bool,
     },
 }
 
@@ -43,7 +76,11 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Command::Run { config: config_path } => {
+        Command::Run {
+            config: config_path,
+            web_bind,
+            no_web,
+        } => {
             let cfg = config::Config::load(&config_path)?;
             println!(
                 "Loaded {} device(s) and {} mapping(s) from {}",
@@ -52,7 +89,11 @@ async fn main() -> anyhow::Result<()> {
                 config_path.display()
             );
             for d in &cfg.devices {
-                println!("  device   {:<16} {:?} @ {}", d.id, d.kind, d.address);
+                let where_ = match d.address {
+                    Some(addr) => addr.to_string(),
+                    None => "virtual".to_string(),
+                };
+                println!("  device   {:<16} {:?} @ {}", d.id, d.kind, where_);
             }
             for m in &cfg.mappings {
                 println!(
@@ -64,7 +105,15 @@ async fn main() -> anyhow::Result<()> {
                     m.to.channel
                 );
             }
-            daemon::run(cfg, Some(config_path)).await?;
+            daemon::run(cfg, Some(config_path), if no_web { None } else { Some(web_bind) }).await?;
+        }
+        Command::Init {
+            output,
+            timeout_secs,
+            force,
+            infer_mappings,
+        } => {
+            init::run(output, Duration::from_secs(timeout_secs), force, infer_mappings).await?;
         }
     }
 

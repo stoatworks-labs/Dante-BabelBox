@@ -6,85 +6,111 @@ use anyhow::{bail, Context, Result};
 use dante_babelbox_preamp_adapter_ah::{AhmAdapter, DliveAdapter};
 use dante_babelbox_preamp_adapter_osc::{WingAdapter, X32Adapter};
 use dante_babelbox_preamp_adapter_yamaha::Dm3Adapter;
-use dante_babelbox_core::{DeviceAdapter, Router};
+use dante_babelbox_core::{DeviceAdapter, DeviceConfig, DeviceKind, Router};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use crate::config::{Config, DeviceKind};
+use crate::config::Config;
+use crate::ports::{DEFAULT_AHM_PORT, DEFAULT_DLIVE_PORT, DEFAULT_DM3_PORT, DEFAULT_WING_PORT, DEFAULT_X32_PORT};
 
-const DEFAULT_X32_PORT: u16 = 10023;
-const DEFAULT_AHM_PORT: u16 = 51325;
-const DEFAULT_WING_PORT: u16 = 2223;
-const DEFAULT_DLIVE_PORT: u16 = 51325;
-const DEFAULT_DM3_PORT: u16 = 49900;
+/// Builds (but does not connect) the adapter for a single real device.
+/// Real-devices-only: callers must filter out `is_virtual` devices first
+/// (a virtual device has no protocol to build an adapter for yet - it's
+/// a placeholder for the not-yet-built emulation layer). Shared between
+/// the startup loop below and the web management API's "add device"
+/// handler, so both construct adapters identically.
+pub fn build_adapter(device: &DeviceConfig) -> Result<Box<dyn DeviceAdapter>> {
+    let ip = device
+        .address
+        .with_context(|| format!("device '{}' has no address", device.id))?;
 
-/// Connects every configured device, wires them through a [`Router`] using
-/// the config's mappings, and runs until interrupted. If `config_path` is
-/// given, mapping changes to that file take effect live (device add/
-/// remove still requires a restart).
-pub async fn run(cfg: Config, config_path: Option<PathBuf>) -> Result<()> {
-    let mut router = Router::new(cfg.mappings);
+    Ok(match device.kind {
+        DeviceKind::OscX32 => {
+            let addr = SocketAddr::new(ip, device.port.unwrap_or(DEFAULT_X32_PORT));
+            Box::new(X32Adapter::new(device.id.clone(), addr))
+        }
+        DeviceKind::AhTcp => {
+            let addr = SocketAddr::new(ip, device.port.unwrap_or(DEFAULT_AHM_PORT));
+            Box::new(AhmAdapter::new(device.id.clone(), addr))
+        }
+        DeviceKind::OscWing => {
+            let addr = SocketAddr::new(ip, device.port.unwrap_or(DEFAULT_WING_PORT));
+            Box::new(WingAdapter::new(device.id.clone(), addr))
+        }
+        DeviceKind::DliveTcp => {
+            let addr = SocketAddr::new(ip, device.port.unwrap_or(DEFAULT_DLIVE_PORT));
+            Box::new(DliveAdapter::new(device.id.clone(), addr))
+        }
+        DeviceKind::YamahaDm3 => {
+            let addr = SocketAddr::new(ip, device.port.unwrap_or(DEFAULT_DM3_PORT));
+            Box::new(Dm3Adapter::new(device.id.clone(), addr))
+        }
+        DeviceKind::AhMidi => bail!(
+            "device '{}': Qu/SQ preamp control is not implemented - A&H's public SQ/Qu MIDI protocol \
+             doc doesn't document preamp gain/pad/phantom messages at all (unlike dLive, which has its \
+             own documented Socket-based preamp protocol - use 'dlive-tcp' for that), so this needs \
+             real-hardware verification before it can be built, not guessing",
+            device.id
+        ),
+        DeviceKind::Yamaha => bail!(
+            "device '{}': Yamaha adapter not implemented yet - blocked on packet captures from real hardware",
+            device.id
+        ),
+    })
+}
+
+/// Connects every configured (non-virtual) device, wires them through a
+/// [`Router`] using the config's mappings, and runs until interrupted.
+/// Virtual devices are skipped here entirely - they exist only for the
+/// web UI's mapping purposes, not as something this loop can dial. If
+/// `config_path` is given, mapping changes to that file take effect live.
+/// If `web_bind` is given, the patch-bay web UI (device/mapping CRUD,
+/// live for virtual devices and mappings - see `dante_babelbox_preamp_web`'s
+/// module doc for what's still restart-only in this phase) is served
+/// there alongside the bridge.
+pub async fn run(cfg: Config, config_path: Option<PathBuf>, web_bind: Option<SocketAddr>) -> Result<()> {
+    let router = Router::new(cfg.mappings);
+    let device_configs = cfg.devices.clone();
 
     for device in &cfg.devices {
-        let mut adapter: Box<dyn DeviceAdapter> = match device.kind {
-            DeviceKind::OscX32 => {
-                let addr = SocketAddr::new(device.address, device.port.unwrap_or(DEFAULT_X32_PORT));
-                Box::new(X32Adapter::new(device.id.clone(), addr))
-            }
-            DeviceKind::AhTcp => {
-                let addr = SocketAddr::new(device.address, device.port.unwrap_or(DEFAULT_AHM_PORT));
-                Box::new(AhmAdapter::new(device.id.clone(), addr))
-            }
-            DeviceKind::OscWing => {
-                let addr = SocketAddr::new(device.address, device.port.unwrap_or(DEFAULT_WING_PORT));
-                Box::new(WingAdapter::new(device.id.clone(), addr))
-            }
-            DeviceKind::DliveTcp => {
-                let addr = SocketAddr::new(device.address, device.port.unwrap_or(DEFAULT_DLIVE_PORT));
-                Box::new(DliveAdapter::new(device.id.clone(), addr))
-            }
-            DeviceKind::YamahaDm3 => {
-                let addr = SocketAddr::new(device.address, device.port.unwrap_or(DEFAULT_DM3_PORT));
-                Box::new(Dm3Adapter::new(device.id.clone(), addr))
-            }
-            DeviceKind::AhMidi => bail!(
-                "device '{}': Qu/SQ preamp control is not implemented - A&H's public SQ/Qu MIDI protocol \
-                 doc doesn't document preamp gain/pad/phantom messages at all (unlike dLive, which has its \
-                 own documented Socket-based preamp protocol - use 'dlive-tcp' for that), so this needs \
-                 real-hardware verification before it can be built, not guessing",
-                device.id
-            ),
-            DeviceKind::Yamaha => bail!(
-                "device '{}': Yamaha adapter not implemented yet - blocked on packet captures from real hardware",
-                device.id
-            ),
-        };
+        if device.is_virtual {
+            info!(device = %device.id, "skipping virtual device - not yet backed by an emulation adapter");
+            continue;
+        }
 
+        let mut adapter = build_adapter(device)?;
         adapter
             .connect()
             .await
-            .with_context(|| format!("connecting to device '{}' at {}", device.id, device.address))?;
-        info!(device = %device.id, kind = ?device.kind, address = %device.address, "connected");
+            .with_context(|| format!("connecting to device '{}' at {:?}", device.id, device.address))?;
+        info!(device = %device.id, kind = ?device.kind, address = ?device.address, "connected");
 
-        router.register_device(device.id.clone(), Arc::new(Mutex::new(adapter)));
+        router.register_device(device.id.clone(), Arc::new(Mutex::new(adapter))).await;
     }
-
-    let router = Arc::new(router);
 
     if let Some(path) = config_path {
         let router = Arc::clone(&router);
         tokio::spawn(watch_and_apply_mappings(path, router));
     }
 
+    if let Some(bind) = web_bind {
+        let state = dante_babelbox_preamp_web::PatchState {
+            router: Arc::clone(&router),
+            devices: dante_babelbox_preamp_web::DeviceRegistry::new(device_configs),
+            build_adapter: Arc::new(build_adapter),
+        };
+        tokio::spawn(async move {
+            if let Err(e) = dante_babelbox_preamp_web::serve(bind, state).await {
+                warn!(error = %e, "patch-bay web UI server stopped");
+            }
+        });
+        info!(%bind, "patch-bay web UI available");
+    }
+
     info!("bridge running - press Ctrl-C to stop");
 
-    tokio::select! {
-        _ = router.run() => {}
-        result = tokio::signal::ctrl_c() => {
-            result.context("waiting for Ctrl-C")?;
-            info!("shutting down");
-        }
-    }
+    tokio::signal::ctrl_c().await.context("waiting for Ctrl-C")?;
+    info!("shutting down");
 
     Ok(())
 }
@@ -112,8 +138,7 @@ async fn watch_and_apply_mappings(path: PathBuf, router: Arc<Router>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::DeviceConfig;
-    use dante_babelbox_core::{Mapping, PreampAddress};
+    use dante_babelbox_core::{DeviceConfig, Mapping, PreampAddress};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, UdpSocket};
@@ -137,14 +162,18 @@ mod tests {
                 DeviceConfig {
                     id: "x32".into(),
                     kind: DeviceKind::OscX32,
-                    address: x32_addr.ip(),
+                    address: Some(x32_addr.ip()),
                     port: Some(x32_addr.port()),
+                    is_virtual: false,
+                    channels: None,
                 },
                 DeviceConfig {
                     id: "ahm".into(),
                     kind: DeviceKind::AhTcp,
-                    address: ahm_addr.ip(),
+                    address: Some(ahm_addr.ip()),
                     port: Some(ahm_addr.port()),
+                    is_virtual: false,
+                    channels: None,
                 },
             ],
             mappings: vec![Mapping {
@@ -154,7 +183,7 @@ mod tests {
             }],
         };
 
-        let bridge = tokio::spawn(run(cfg, None));
+        let bridge = tokio::spawn(run(cfg, None, None));
 
         let (mut ahm_socket, _) = tokio::time::timeout(Duration::from_secs(2), ahm_listener.accept())
             .await
@@ -221,14 +250,18 @@ mod tests {
                 DeviceConfig {
                     id: "dlive".into(),
                     kind: DeviceKind::DliveTcp,
-                    address: dlive_addr.ip(),
+                    address: Some(dlive_addr.ip()),
                     port: Some(dlive_addr.port()),
+                    is_virtual: false,
+                    channels: None,
                 },
                 DeviceConfig {
                     id: "dm3".into(),
                     kind: DeviceKind::YamahaDm3,
-                    address: dm3_addr.ip(),
+                    address: Some(dm3_addr.ip()),
                     port: Some(dm3_addr.port()),
+                    is_virtual: false,
+                    channels: None,
                 },
             ],
             mappings: vec![Mapping {
@@ -238,7 +271,7 @@ mod tests {
             }],
         };
 
-        let bridge = tokio::spawn(run(cfg, None));
+        let bridge = tokio::spawn(run(cfg, None, None));
 
         let (mut dlive_socket, _) = tokio::time::timeout(Duration::from_secs(2), dlive_listener.accept())
             .await

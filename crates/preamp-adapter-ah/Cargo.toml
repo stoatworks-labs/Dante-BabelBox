@@ -8,4 +8,5 @@ license.workspace = true
 dante-babelbox-core.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true

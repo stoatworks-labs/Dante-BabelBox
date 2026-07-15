@@ -30,8 +30,8 @@
 //! unconfirmed behaviour, not a documented guarantee.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -40,7 +40,8 @@ use dante_babelbox_core::{
 };
 use rosc::{OscMessage, OscPacket, OscType};
 use tokio::net::UdpSocket;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, oneshot, Mutex};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 const HA_GAIN_ADDR: &str = "IO:Current/InCh/HAGain";
@@ -48,12 +49,16 @@ const PHANTOM_ADDR: &str = "IO:Current/InCh/48VOn";
 const GAIN_MIN_DB: f32 = 0.0;
 const GAIN_MAX_DB: f32 = 64.0;
 
+type PendingIdentify = Arc<StdMutex<Option<oneshot::Sender<DeviceInfo>>>>;
+
 pub struct Dm3Adapter {
     id: Arc<str>,
     remote: SocketAddr,
     socket: Option<Arc<UdpSocket>>,
     tx: broadcast::Sender<PreampEvent>,
     state: Arc<Mutex<HashMap<u16, PreampState>>>,
+    pending_identify: PendingIdentify,
+    cancel: CancellationToken,
 }
 
 impl Dm3Adapter {
@@ -65,6 +70,8 @@ impl Dm3Adapter {
             socket: None,
             tx,
             state: Arc::new(Mutex::new(HashMap::new())),
+            pending_identify: Arc::new(StdMutex::new(None)),
+            cancel: CancellationToken::new(),
         }
     }
 
@@ -78,16 +85,12 @@ impl Dm3Adapter {
         Ok(())
     }
 
-    async fn send(&self, action: &str, address: &str, channel: u16, value: OscType) -> AdapterResult<()> {
+    async fn send_raw(&self, addr: String, args: Vec<OscType>) -> AdapterResult<()> {
         let socket = self
             .socket
             .as_ref()
             .ok_or_else(|| AdapterError::Connection("not connected".into()))?;
-        let addr = format!("/yosc:req/{action}/{address}/{channel}/1");
-        let packet = OscPacket::Message(OscMessage {
-            addr,
-            args: vec![value],
-        });
+        let packet = OscPacket::Message(OscMessage { addr, args });
         let bytes = rosc::encoder::encode(&packet)
             .map_err(|e| AdapterError::Protocol(format!("OSC encode failed: {e:?}")))?;
         socket
@@ -95,6 +98,11 @@ impl Dm3Adapter {
             .await
             .map_err(|e| AdapterError::Connection(e.to_string()))?;
         Ok(())
+    }
+
+    async fn send(&self, action: &str, address: &str, channel: u16, value: OscType) -> AdapterResult<()> {
+        self.send_raw(format!("/yosc:req/{action}/{address}/{channel}/1"), vec![value])
+            .await
     }
 }
 
@@ -120,15 +128,37 @@ impl DeviceAdapter for Dm3Adapter {
             Arc::clone(&self.id),
             self.tx.clone(),
             Arc::clone(&self.state),
+            Arc::clone(&self.pending_identify),
+            self.remote.ip(),
+            self.cancel.clone(),
         );
 
         Ok(())
     }
 
+    async fn disconnect(&mut self) -> AdapterResult<()> {
+        self.cancel.cancel();
+        Ok(())
+    }
+
     async fn identify(&mut self) -> AdapterResult<DeviceInfo> {
-        Err(AdapterError::Protocol(
-            "identify: DM3 OSC spec documents no device-identity query".into(),
-        ))
+        // Weakest-signal probe of the four adapters: the spec documents
+        // no identify/model query at all. This reuses the one documented
+        // "get"-shaped request in the whole spec - "Get Current Scene_A
+        // Number" (`sscurrent_ex`) - and treats any reply mentioning it as
+        // DM3 presence. Model is reported as unconfirmed since nothing in
+        // the spec distinguishes DM3 from DM3S over the wire.
+        let (tx, rx) = oneshot::channel();
+        *self.pending_identify.lock().unwrap() = Some(tx);
+        self.send_raw(
+            "/yosc:req/sscurrent_ex".to_string(),
+            vec![OscType::String("scene_a".to_string())],
+        )
+        .await?;
+        tokio::time::timeout(Duration::from_secs(2), rx)
+            .await
+            .map_err(|_| AdapterError::Protocol("identify: timed out waiting for a reply".into()))?
+            .map_err(|_| AdapterError::Protocol("identify: reply channel dropped".into()))
     }
 
     async fn set_gain(&mut self, channel: u16, gain_db: f32) -> AdapterResult<()> {
@@ -199,24 +229,58 @@ fn last_int_value(args: &[OscType]) -> Option<i32> {
     })
 }
 
+/// Recognizes a reply to the `sscurrent_ex "scene_a"` identify probe -
+/// either by address (if the console echoes `sscurrent_ex` back) or by a
+/// `"scene_a"` string argument. Deliberately loose since the spec gives no
+/// worked reply example for this at all; see the module doc comment.
+fn parse_identify_reply(msg: &OscMessage, address: IpAddr) -> Option<DeviceInfo> {
+    let addr_matches = msg.addr.contains("sscurrent_ex");
+    let arg_matches = msg
+        .args
+        .iter()
+        .any(|a| matches!(a, OscType::String(s) if s == "scene_a"));
+    if !addr_matches && !arg_matches {
+        return None;
+    }
+    Some(DeviceInfo {
+        vendor: "Yamaha".to_string(),
+        model: "DM3 series (unconfirmed sub-model)".to_string(),
+        address,
+    })
+}
+
 fn spawn_receive_loop(
     socket: Arc<UdpSocket>,
     id: Arc<str>,
     tx: broadcast::Sender<PreampEvent>,
     state: Arc<Mutex<HashMap<u16, PreampState>>>,
+    pending_identify: PendingIdentify,
+    remote_ip: IpAddr,
+    cancel: CancellationToken,
 ) {
     tokio::spawn(async move {
         let mut buf = [0u8; 4096];
         loop {
-            let len = match socket.recv(&mut buf).await {
-                Ok(len) => len,
-                Err(e) => {
-                    warn!(device = %id, error = %e, "DM3 OSC socket read failed, stopping receive loop");
-                    return;
-                }
+            let len = tokio::select! {
+                _ = cancel.cancelled() => return,
+                result = socket.recv(&mut buf) => match result {
+                    Ok(len) => len,
+                    Err(e) => {
+                        warn!(device = %id, error = %e, "DM3 OSC socket read failed, stopping receive loop");
+                        return;
+                    }
+                },
             };
             match rosc::decoder::decode_udp(&buf[..len]) {
-                Ok((_, OscPacket::Message(msg))) => handle_message(msg, &id, &tx, &state).await,
+                Ok((_, OscPacket::Message(msg))) => {
+                    if let Some(info) = parse_identify_reply(&msg, remote_ip) {
+                        if let Some(sender) = pending_identify.lock().unwrap().take() {
+                            let _ = sender.send(info);
+                        }
+                        continue;
+                    }
+                    handle_message(msg, &id, &tx, &state).await
+                }
                 Ok((_, OscPacket::Bundle(_))) => {
                     debug!(device = %id, "ignoring OSC bundle from DM3");
                 }
@@ -304,5 +368,82 @@ mod tests {
         };
         assert_eq!(m.addr, "/yosc:req/set/IO:Current/InCh/HAGain/3/1");
         assert_eq!(m.args, vec![OscType::Int(42)]);
+    }
+
+    #[test]
+    fn parse_identify_reply_matches_by_address_or_arg() {
+        let addr: IpAddr = "10.0.0.5".parse().unwrap();
+
+        let by_addr = OscMessage {
+            addr: "/yosc:rpl/sscurrent_ex".to_string(),
+            args: vec![OscType::String("1".into())],
+        };
+        assert!(parse_identify_reply(&by_addr, addr).is_some());
+
+        let by_arg = OscMessage {
+            addr: "/yosc:req/sscurrent_ex".to_string(),
+            args: vec![OscType::String("scene_a".into()), OscType::String("1".into())],
+        };
+        assert!(parse_identify_reply(&by_arg, addr).is_some());
+
+        let unrelated = OscMessage {
+            addr: "/yosc:req/set/MIXER:Current/InCh/Fader/Level/1/1".to_string(),
+            args: vec![OscType::Int(-32768)],
+        };
+        assert!(parse_identify_reply(&unrelated, addr).is_none());
+    }
+
+    #[tokio::test]
+    async fn identify_resolves_from_scene_reply() {
+        let listener = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let listener_addr = listener.local_addr().unwrap();
+
+        let mut adapter = Dm3Adapter::new("dm3-1", listener_addr);
+        adapter.connect().await.unwrap();
+
+        let server = tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            let (len, from) = listener.recv_from(&mut buf).await.unwrap();
+            let (_, packet) = rosc::decoder::decode_udp(&buf[..len]).unwrap();
+            assert!(matches!(&packet, OscPacket::Message(m) if m.addr == "/yosc:req/sscurrent_ex"));
+
+            let reply = OscPacket::Message(OscMessage {
+                addr: "/yosc:req/sscurrent_ex".to_string(),
+                args: vec![OscType::String("scene_a".into()), OscType::String("3".into())],
+            });
+            let bytes = rosc::encoder::encode(&reply).unwrap();
+            listener.send_to(&bytes, from).await.unwrap();
+        });
+
+        let info = adapter.identify().await.unwrap();
+        assert_eq!(info.vendor, "Yamaha");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn disconnect_stops_the_receive_loop() {
+        let mock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        let mut adapter = Dm3Adapter::new("dm3-1", mock.local_addr().unwrap());
+        adapter.connect().await.unwrap();
+        let mut events = adapter.subscribe();
+
+        // Learn the adapter's ephemeral port from a fire-and-forget set.
+        adapter.set_gain(1, 10.0).await.unwrap();
+        let mut buf = [0u8; 512];
+        let (_, from) = mock.recv_from(&mut buf).await.unwrap();
+
+        adapter.disconnect().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await; // let the loop actually exit
+
+        let packet = rosc::encoder::encode(&OscPacket::Message(OscMessage {
+            addr: "/yosc:req/set/IO:Current/InCh/HAGain/1/1".to_string(),
+            args: vec![OscType::Int(20)],
+        }))
+        .unwrap();
+        mock.send_to(&packet, from).await.unwrap();
+
+        let result = tokio::time::timeout(Duration::from_millis(200), events.recv()).await;
+        assert!(result.is_err(), "must not receive events after disconnect");
     }
 }

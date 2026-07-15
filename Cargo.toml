@@ -7,6 +7,7 @@ members = [
     "crates/preamp-adapter-ah",
     "crates/preamp-adapter-yamaha",
     "crates/preamp-cli",
+    "crates/preamp-web",
     "crates/mic-core",
     "crates/mic-adapter-shure",
     "crates/mic-adapter-sennheiser",
@@ -22,18 +23,23 @@ license = "MIT"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "1"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+axum = { version = "0.7", features = ["ws"] }
+tower = { version = "0.5", features = ["util"] }
+tokio-util = "0.7"
 
 dante-babelbox-core = { path = "crates/core" }
 dante-babelbox-discovery = { path = "crates/discovery" }
 dante-babelbox-preamp-adapter-osc = { path = "crates/preamp-adapter-osc" }
 dante-babelbox-preamp-adapter-ah = { path = "crates/preamp-adapter-ah" }
 dante-babelbox-preamp-adapter-yamaha = { path = "crates/preamp-adapter-yamaha" }
+dante-babelbox-preamp-web = { path = "crates/preamp-web" }
 dante-babelbox-mic-core = { path = "crates/mic-core" }
 dante-babelbox-mic-adapter-shure = { path = "crates/mic-adapter-shure" }
 dante-babelbox-mic-adapter-sennheiser = { path = "crates/mic-adapter-sennheiser" }

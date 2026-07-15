@@ -32,6 +32,12 @@ pub struct DeviceInfo {
 pub trait DeviceAdapter: Send + Sync {
     fn id(&self) -> &str;
     async fn connect(&mut self) -> AdapterResult<()>;
+    /// Stops this adapter's background socket/task(s) and releases the
+    /// connection. Required (not a default no-op) so every adapter has to
+    /// deliberately implement real teardown - without it, a device
+    /// "removed" from the Router would leave its listener task running
+    /// and its port held forever.
+    async fn disconnect(&mut self) -> AdapterResult<()>;
     async fn identify(&mut self) -> AdapterResult<DeviceInfo>;
     async fn set_gain(&mut self, channel: u16, gain_db: f32) -> AdapterResult<()>;
     async fn set_phantom(&mut self, channel: u16, on: bool) -> AdapterResult<()>;

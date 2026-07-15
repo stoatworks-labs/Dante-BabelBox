@@ -1,9 +1,8 @@
 use std::collections::HashSet;
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use dante_babelbox_core::Mapping;
+use dante_babelbox_core::{DeviceConfig, Mapping};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -12,26 +11,6 @@ pub struct Config {
     pub devices: Vec<DeviceConfig>,
     #[serde(default, rename = "mapping")]
     pub mappings: Vec<Mapping>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct DeviceConfig {
-    pub id: String,
-    pub kind: DeviceKind,
-    pub address: IpAddr,
-    pub port: Option<u16>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DeviceKind {
-    OscX32,
-    OscWing,
-    AhTcp,
-    DliveTcp,
-    AhMidi,
-    YamahaDm3,
-    Yamaha,
 }
 
 impl Config {
@@ -49,6 +28,9 @@ impl Config {
         for d in &self.devices {
             if !ids.insert(d.id.as_str()) {
                 bail!("duplicate device id '{}' in config", d.id);
+            }
+            if !d.is_virtual && d.address.is_none() {
+                bail!("device '{}' is not virtual but has no address", d.id);
             }
         }
         for m in &self.mappings {
@@ -116,6 +98,7 @@ pub fn watch(path: PathBuf) -> Result<tokio::sync::watch::Receiver<Config>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dante_babelbox_core::DeviceKind;
 
     const EXAMPLE: &str = r#"
 [[device]]
@@ -177,6 +160,39 @@ to   = { device = "does-not-exist", channel = 7 }
         std::fs::remove_file(&path).ok();
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_non_virtual_device_with_no_address() {
+        let bad = r#"
+[[device]]
+id = "sq-foh"
+kind = "ah-midi"
+"#;
+        let path = write_temp(bad);
+        let result = Config::load(&path);
+        std::fs::remove_file(&path).ok();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn accepts_virtual_device_with_no_address() {
+        let ok = r#"
+[[device]]
+id = "future-x32"
+kind = "osc-x32"
+virtual = true
+channels = 8
+"#;
+        let path = write_temp(ok);
+        let cfg = Config::load(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(cfg.devices.len(), 1);
+        assert!(cfg.devices[0].is_virtual);
+        assert_eq!(cfg.devices[0].address, None);
+        assert_eq!(cfg.devices[0].channels, Some(8));
     }
 
     #[tokio::test]
