@@ -1,11 +1,11 @@
 # Dante-BabelBox
 
 > **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
-> (Anthropic). Adapters are built against official/community-authoritative
-> vendor protocol specs (see each adapter's module doc comment for its
-> source), but this has **not been validated against real hardware** —
-> only against mock devices in the test suite. Review before use on live
-> gear.
+> (Anthropic), directed and reviewed by a human author. Adapters are built
+> against official/community-authoritative vendor protocol specs (see each
+> adapter's module doc comment for its source), but this has **not been
+> validated against real hardware** — only against mock devices in the
+> test suite. Review before use on live gear.
 
 Cross-vendor Dante control bridge, currently covering two domains:
 
