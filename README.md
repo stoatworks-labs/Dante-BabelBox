@@ -22,6 +22,17 @@ layers its own proprietary control protocol on top of the same network.
 This project translates those protocols so state on one vendor's device
 is usable from outside its own ecosystem.
 
+```mermaid
+flowchart LR
+    X32["Behringer / Midas<br/>(OSC)"] <--> BB
+    AH["Allen & Heath<br/>(NRPN over TCP)"] <--> BB
+    YAM["Yamaha DM3<br/>(OSC)"] <--> BB
+    BB["Dante-BabelBox<br/>translating router"]
+    SHURE["Shure ULX-D / Axient<br/>(ASCII/TCP)"] --> BB
+    SENN["Sennheiser EW-DX<br/>(SSC/JSON over UDP)"] --> BB
+    BB --> STATE["Unified gain / phantom state<br/>+ radio-mic telemetry"]
+```
+
 ## Preamp Control — Status
 
 | Vendor | Device | Protocol | Status |
@@ -280,6 +291,14 @@ the same class of problem as preamp device emulation above, needing
 packet captures of a real console+device pairing to learn the display's
 own query/identity handshake. Deferred until there's real hardware
 access.
+
+## Roadmap / TODO
+
+- [ ] **Validate against real hardware** — every adapter is currently tested only against mock devices; nothing has been run on live gear.
+- [ ] **Preamp device emulation** — make the bridge answer as a native device of a foreign brand so a console's own preamp UI controls it directly (needs packet captures of a real console+device pairing).
+- [ ] **Telemetry emulation on a host console** — e.g. surface ULX-D-shaped data on a Yamaha QL Wireless Monitor screen (same capture-dependent problem).
+- [ ] **More preamp vendors** — Allen & Heath Qu/SQ, Yamaha CL/QL/DM7, Yamaha Rio/Tio; all blocked on missing public control specs or wire-format captures.
+- [ ] **Wing** — currently only its 8 built-in preamps; extend to remote stagebox preamps.
 
 ## Contributing a new adapter
 
