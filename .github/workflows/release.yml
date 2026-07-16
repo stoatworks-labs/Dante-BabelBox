@@ -54,7 +54,7 @@ jobs:
       - name: Stage binaries
         shell: bash
         env:
-          BINS: "dante-babelbox-mic-cli dante-babelbox-preamp-cli"
+          BINS: "mic-monitor preamp-bridge"
         run: |
           mkdir -p dist
           ext=""
@@ -81,10 +81,10 @@ jobs:
           description: Cross-vendor Dante control bridge (preamp + radio-mic telemetry)
           license: MIT
           contents:
-            - src: ./dante-babelbox-mic-cli
-              dst: /usr/bin/dante-babelbox-mic-cli
-            - src: ./dante-babelbox-preamp-cli
-              dst: /usr/bin/dante-babelbox-preamp-cli
+            - src: ./mic-monitor
+              dst: /usr/bin/dante-babelbox-mic-monitor
+            - src: ./preamp-bridge
+              dst: /usr/bin/dante-babelbox-preamp-bridge
           EOF
           ( cd dist && nfpm package -f nfpm.yaml -p deb && nfpm package -f nfpm.yaml -p rpm )
           rm -f dist/nfpm.yaml
