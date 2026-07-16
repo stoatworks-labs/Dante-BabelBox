@@ -1,0 +1,129 @@
+name: release
+
+# Build native binaries for Windows, macOS and Linux (x86_64 + arm64).
+# Linux jobs also emit .deb and .rpm packages via nfpm.
+# Trigger manually (Actions > release > Run workflow) or by pushing a v* tag.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64,    os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,   pkgarch: amd64 }
+          - { name: linux-aarch64,   os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu,  pkgarch: arm64 }
+          - { name: windows-x86_64,  os: windows-latest,   target: x86_64-pc-windows-msvc }
+          - { name: windows-aarch64, os: windows-11-arm,   target: aarch64-pc-windows-msvc }
+          - { name: macos-x86_64,    os: macos-13,         target: x86_64-apple-darwin }
+          - { name: macos-aarch64,   os: macos-14,         target: aarch64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Derive version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.1.0-dev.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.target }} --bins
+
+      - name: Stage binaries
+        shell: bash
+        env:
+          BINS: "dante-babelbox-mic-cli dante-babelbox-preamp-cli"
+        run: |
+          mkdir -p dist
+          ext=""
+          [[ "${{ matrix.target }}" == *windows* ]] && ext=".exe"
+          for b in $BINS; do
+            cp "target/${{ matrix.target }}/release/${b}${ext}" "dist/${b}${ext}"
+          done
+          ls -la dist
+
+      - name: Package .deb and .rpm (Linux only)
+        if: startsWith(matrix.os, 'ubuntu')
+        shell: bash
+        env:
+          PKGARCH: ${{ matrix.pkgarch }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.41.1
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          cat > dist/nfpm.yaml <<EOF
+          name: dante-babelbox
+          arch: ${PKGARCH}
+          version: "${VERSION}"
+          maintainer: Allan Sargeant <allan.sargeant@gmail.com>
+          description: Cross-vendor Dante control bridge (preamp + radio-mic telemetry)
+          license: MIT
+          contents:
+            - src: ./dante-babelbox-mic-cli
+              dst: /usr/bin/dante-babelbox-mic-cli
+            - src: ./dante-babelbox-preamp-cli
+              dst: /usr/bin/dante-babelbox-preamp-cli
+          EOF
+          ( cd dist && nfpm package -f nfpm.yaml -p deb && nfpm package -f nfpm.yaml -p rpm )
+          rm -f dist/nfpm.yaml
+
+      - name: Create archive
+        shell: bash
+        run: |
+          cd dist
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            7z a "../dante-babelbox-${{ matrix.name }}.zip" ./*.exe
+          else
+            tar czf "../dante-babelbox-${{ matrix.name }}.tar.gz" --exclude='*.deb' --exclude='*.rpm' .
+          fi
+          cd ..
+          # Move linux packages up to the root for upload
+          mv dist/*.deb dist/*.rpm . 2>/dev/null || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dante-babelbox-${{ matrix.name }}
+          path: |
+            *.zip
+            *.tar.gz
+            *.deb
+            *.rpm
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
