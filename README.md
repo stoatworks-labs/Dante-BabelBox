@@ -296,6 +296,52 @@ packet captures of a real console+device pairing to learn the display's
 own query/identity handshake. Deferred until there's real hardware
 access.
 
+## Unsigned builds — macOS Gatekeeper & Windows SmartScreen
+
+The release binaries are **not code-signed or notarized** — that needs paid
+Apple / Windows developer certificates this project doesn't carry. The binaries
+are safe to run; the OS just can't verify a publisher, so it warns you the first
+time. Here's how to get past that, and how to sign them yourself if you'd rather.
+
+### macOS
+
+These are command-line binaries, so clear the quarantine flag in Terminal. After
+extracting the archive, `cd` into it and run:
+
+```sh
+xattr -dr com.apple.quarantine ./<binary>   # remove the "unverified developer" flag
+chmod +x ./<binary>                          # ensure it's executable
+./<binary> --help
+```
+
+Or run it once, let macOS block it, then go to **System Settings → Privacy &
+Security** and click **Open Anyway**.
+
+### Windows
+
+Running the `.exe` may show **"Windows protected your PC"** (SmartScreen) — click
+**More info → Run anyway**. If you extracted it from a `.zip`, you can clear the
+flag first: right-click the `.exe` → **Properties** → tick **Unblock** → **OK**,
+or in PowerShell `Unblock-File .\<binary>.exe`.
+
+### Linux
+
+No signing gate — just `chmod +x ./<binary>` (or install the `.deb`/`.rpm`).
+
+### Signing it yourself (optional)
+
+On macOS an *ad-hoc* signature stops repeated prompts on your own machine (it is
+**not** notarization — it won't clear Gatekeeper on someone else's Mac):
+
+```sh
+codesign --force --sign - ./<binary>
+```
+
+Clearing the warnings for redistribution needs paid certificates: an **Apple
+Developer Program** membership ($99/yr) + a *Developer ID Application* cert with
+`xcrun notarytool` on macOS, or an **Authenticode** code-signing certificate from
+a CA (`signtool sign`) on Windows.
+
 ## Roadmap / TODO
 
 - [ ] **Validate against real hardware** — every adapter is currently tested only against mock devices; nothing has been run on live gear.
