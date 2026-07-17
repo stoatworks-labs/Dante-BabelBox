@@ -322,21 +322,18 @@ fn spawn_receive_loop(
             let mut identity_updated = false;
 
             for update in extract_updates(&root) {
-                match update {
-                    Update::Identity { vendor, product } => {
-                        let mut guard = identity.lock().await;
-                        let mut entry = guard.clone().unwrap_or(Identity { vendor: String::new(), product: String::new() });
-                        if let Some(v) = vendor {
-                            entry.vendor = v;
-                        }
-                        if let Some(p) = product {
-                            entry.product = p;
-                        }
-                        *guard = Some(entry);
-                        identity_updated = true;
-                        continue;
+                if let Update::Identity { vendor, product } = update {
+                    let mut guard = identity.lock().await;
+                    let mut entry = guard.clone().unwrap_or(Identity { vendor: String::new(), product: String::new() });
+                    if let Some(v) = vendor {
+                        entry.vendor = v;
                     }
-                    _ => {}
+                    if let Some(p) = product {
+                        entry.product = p;
+                    }
+                    *guard = Some(entry);
+                    identity_updated = true;
+                    continue;
                 }
 
                 let mut guard = state.lock().await;

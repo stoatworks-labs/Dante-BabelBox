@@ -23,8 +23,10 @@ mod tests {
         mute_calls: Arc<AsyncMutex<HashMap<u16, bool>>>,
     }
 
+    type MockAdapterParts = (MockAdapter, broadcast::Sender<MicEvent>, Arc<AsyncMutex<HashMap<u16, bool>>>);
+
     impl MockAdapter {
-        fn new(id: &str) -> (Self, broadcast::Sender<MicEvent>, Arc<AsyncMutex<HashMap<u16, bool>>>) {
+        fn new(id: &str) -> MockAdapterParts {
             let (tx, _rx) = broadcast::channel(16);
             let mute_calls = Arc::new(AsyncMutex::new(HashMap::new()));
             (

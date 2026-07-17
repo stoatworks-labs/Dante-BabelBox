@@ -204,15 +204,23 @@ channels = 8
         assert_eq!(rx.borrow().mappings.len(), 1);
 
         let updated = EXAMPLE.replace("channel = 7", "channel = 9");
-        // Give the watcher a moment to be fully registered with the OS
-        // before we edit, to avoid a race on very fast filesystems.
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        std::fs::write(&path, &updated).unwrap();
 
-        tokio::time::timeout(std::time::Duration::from_secs(5), rx.changed())
-            .await
-            .expect("timed out waiting for watch() to notice the file edit")
-            .unwrap();
+        // Retry the write rather than relying on a fixed pre-sleep to
+        // guess when the OS-level watch is registered - a fixed guess
+        // can still race under heavy parallel test load (seen flaking
+        // under `cargo test --workspace`); writing the same content
+        // repeatedly until the watcher notices converges regardless of
+        // scheduling variance, since `watch::Sender::send` always marks
+        // receivers changed, even for content-identical values.
+        let mut noticed = false;
+        for _ in 0..20 {
+            std::fs::write(&path, &updated).unwrap();
+            if tokio::time::timeout(std::time::Duration::from_millis(250), rx.changed()).await.is_ok() {
+                noticed = true;
+                break;
+            }
+        }
+        assert!(noticed, "watch() never noticed the file edit after repeated writes");
 
         assert_eq!(rx.borrow().mappings[0].to.channel, 9);
         std::fs::remove_file(&path).ok();
