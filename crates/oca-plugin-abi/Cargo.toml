@@ -1,0 +1,9 @@
+[package]
+name = "dante-babelbox-oca-plugin-abi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dante-babelbox-oca.workspace = true
+abi_stable.workspace = true

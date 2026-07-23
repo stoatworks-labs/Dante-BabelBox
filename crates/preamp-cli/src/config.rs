@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use dante_babelbox_core::{DeviceConfig, Mapping};
+use dante_babelbox_core::{ChannelMapping, DeviceConfig};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -10,7 +10,7 @@ pub struct Config {
     #[serde(default, rename = "device")]
     pub devices: Vec<DeviceConfig>,
     #[serde(default, rename = "mapping")]
-    pub mappings: Vec<Mapping>,
+    pub mappings: Vec<ChannelMapping>,
 }
 
 impl Config {
@@ -98,7 +98,6 @@ pub fn watch(path: PathBuf) -> Result<tokio::sync::watch::Receiver<Config>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dante_babelbox_core::DeviceKind;
 
     const EXAMPLE: &str = r#"
 [[device]]
@@ -138,7 +137,7 @@ bidirectional = true
 
         assert_eq!(cfg.devices.len(), 2);
         assert_eq!(cfg.mappings.len(), 1);
-        assert_eq!(cfg.devices[1].kind, DeviceKind::OscX32);
+        assert_eq!(cfg.devices[1].kind, "osc-x32");
         assert_eq!(cfg.devices[1].port, Some(10023));
         assert!(cfg.mappings[0].bidirectional);
     }

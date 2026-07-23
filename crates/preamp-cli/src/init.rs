@@ -20,7 +20,7 @@ use anyhow::{bail, Context, Result};
 use dante_babelbox_preamp_adapter_ah::{AhmAdapter, DliveAdapter};
 use dante_babelbox_preamp_adapter_osc::{WingAdapter, X32Adapter};
 use dante_babelbox_preamp_adapter_yamaha::Dm3Adapter;
-use dante_babelbox_core::{DeviceAdapter, DeviceConfig, DeviceKind, Mapping, PreampAddress};
+use dante_babelbox_core::{ChannelMapping, DeviceAdapter, DeviceConfig, PreampAddress};
 use dante_babelbox_discovery::dante_control;
 use serde::Serialize;
 use tracing::{debug, info};
@@ -28,9 +28,9 @@ use tracing::{debug, info};
 use crate::config::Config;
 use crate::ports::{DEFAULT_AHM_PORT, DEFAULT_DLIVE_PORT, DEFAULT_DM3_PORT, DEFAULT_WING_PORT, DEFAULT_X32_PORT};
 
-/// The protocol kinds `init` knows how to probe for - a subset of
-/// `DeviceKind` (excludes `ah-midi` and `yamaha`, which have no adapter).
-/// Tried in this order for every discovered IP; AHM and dLive share port
+/// The protocol kinds `init` knows how to probe for - a subset of the
+/// registered kind ids (excludes `ah-midi` and `yamaha`, which have no
+/// adapter). Tried in this order for every discovered IP; AHM and dLive share port
 /// 51325 by default, so both get tried against it.
 #[derive(Debug, Clone, Copy)]
 enum ProbeKind {
@@ -60,14 +60,12 @@ impl ProbeKind {
         }
     }
 
-    fn as_device_kind(self) -> DeviceKind {
-        match self {
-            ProbeKind::OscWing => DeviceKind::OscWing,
-            ProbeKind::OscX32 => DeviceKind::OscX32,
-            ProbeKind::AhTcp => DeviceKind::AhTcp,
-            ProbeKind::DliveTcp => DeviceKind::DliveTcp,
-            ProbeKind::YamahaDm3 => DeviceKind::YamahaDm3,
-        }
+    /// The device "kind" id to record in `DeviceConfig.kind` - just
+    /// `slug()` as an owned `String`, kept as a separate method (rather
+    /// than callers using `slug().to_string()` directly) so the "this is
+    /// the kind id" intent is named at the call site.
+    fn as_device_kind(self) -> String {
+        self.slug().to_string()
     }
 
     fn slug(self) -> &'static str {
@@ -177,7 +175,7 @@ pub async fn probe_and_build(ips: Vec<IpAddr>, per_attempt_timeout: Duration) ->
 /// Dante Virtual Soundcard) can't be bridged anyway, since there's no
 /// adapter for it. Devices with no known ARC port, or that don't answer
 /// a query, are silently skipped rather than failing the whole run.
-pub async fn infer_mappings(devices: &[DeviceConfig], arc_ports: &HashMap<IpAddr, u16>) -> Vec<Mapping> {
+pub async fn infer_mappings(devices: &[DeviceConfig], arc_ports: &HashMap<IpAddr, u16>) -> Vec<ChannelMapping> {
     let mut arc_addr_of: HashMap<&str, SocketAddr> = HashMap::new();
     for device in devices {
         let Some(ip) = device.address else { continue };
@@ -236,7 +234,7 @@ pub async fn infer_mappings(devices: &[DeviceConfig], arc_ports: &HashMap<IpAddr
                 continue;
             };
 
-            mappings.push(Mapping {
+            mappings.push(ChannelMapping {
                 from: PreampAddress::new(source_id, tx_number),
                 to: PreampAddress::new(device.id.clone(), rx.number),
                 bidirectional: true,
@@ -251,8 +249,8 @@ pub async fn infer_mappings(devices: &[DeviceConfig], arc_ports: &HashMap<IpAddr
 struct DeviceListToml<'a> {
     #[serde(rename = "device")]
     devices: &'a [DeviceConfig],
-    #[serde(rename = "mapping", skip_serializing_if = "<[Mapping]>::is_empty")]
-    mappings: &'a [Mapping],
+    #[serde(rename = "mapping", skip_serializing_if = "<[ChannelMapping]>::is_empty")]
+    mappings: &'a [ChannelMapping],
 }
 
 const MAPPING_SCAFFOLD_HEADER: &str = "\
@@ -379,7 +377,7 @@ mod tests {
 
         let found = probe_and_build(vec![ip], Duration::from_secs(2)).await;
         assert_eq!(found.devices.len(), 1);
-        assert_eq!(found.devices[0].kind, DeviceKind::OscWing);
+        assert_eq!(found.devices[0].kind, "osc-wing");
         assert_eq!(found.devices[0].port, Some(DEFAULT_WING_PORT));
         assert_eq!(found.devices[0].id, "osc-wing-1");
 
@@ -392,7 +390,7 @@ mod tests {
             devices: vec![
                 DeviceConfig {
                     id: "osc-wing-1".to_string(),
-                    kind: DeviceKind::OscWing,
+                    kind: "osc-wing".into(),
                     address: Some("10.0.0.25".parse().unwrap()),
                     port: Some(DEFAULT_WING_PORT),
                     is_virtual: false,
@@ -400,7 +398,7 @@ mod tests {
                 },
                 DeviceConfig {
                     id: "dlive-tcp-15".to_string(),
-                    kind: DeviceKind::DliveTcp,
+                    kind: "dlive-tcp".into(),
                     address: Some("10.0.0.15".parse().unwrap()),
                     port: Some(DEFAULT_DLIVE_PORT),
                     is_virtual: false,
@@ -421,7 +419,7 @@ mod tests {
 
         assert_eq!(loaded.devices.len(), 2);
         assert_eq!(loaded.devices[0].id, "osc-wing-1");
-        assert_eq!(loaded.devices[1].kind, DeviceKind::DliveTcp);
+        assert_eq!(loaded.devices[1].kind, "dlive-tcp");
     }
 
     #[test]
@@ -438,7 +436,7 @@ mod tests {
             devices: vec![
                 DeviceConfig {
                     id: "stagebox".to_string(),
-                    kind: DeviceKind::DliveTcp,
+                    kind: "dlive-tcp".into(),
                     address: Some("10.0.0.15".parse().unwrap()),
                     port: Some(DEFAULT_DLIVE_PORT),
                     is_virtual: false,
@@ -446,14 +444,14 @@ mod tests {
                 },
                 DeviceConfig {
                     id: "console".to_string(),
-                    kind: DeviceKind::OscX32,
+                    kind: "osc-x32".into(),
                     address: Some("10.0.0.20".parse().unwrap()),
                     port: Some(DEFAULT_X32_PORT),
                     is_virtual: false,
                     channels: None,
                 },
             ],
-            mappings: vec![Mapping {
+            mappings: vec![ChannelMapping {
                 from: PreampAddress::new("stagebox", 1),
                 to: PreampAddress::new("console", 5),
                 bidirectional: true,
@@ -576,7 +574,7 @@ mod tests {
         let devices = vec![
             DeviceConfig {
                 id: "stagebox".to_string(),
-                kind: DeviceKind::DliveTcp,
+                kind: "dlive-tcp".into(),
                 address: Some(stagebox_addr.ip()),
                 port: None,
                 is_virtual: false,
@@ -584,7 +582,7 @@ mod tests {
             },
             DeviceConfig {
                 id: "console".to_string(),
-                kind: DeviceKind::OscX32,
+                kind: "osc-x32".into(),
                 address: Some(console_addr.ip()),
                 port: None,
                 is_virtual: false,
@@ -654,7 +652,7 @@ mod tests {
 
         let devices = vec![DeviceConfig {
             id: "console".to_string(),
-            kind: DeviceKind::OscX32,
+            kind: "osc-x32".into(),
             address: Some(console_addr.ip()),
             port: None,
             is_virtual: false,

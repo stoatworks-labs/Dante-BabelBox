@@ -9,6 +9,7 @@ name = "preamp-bridge"
 path = "src/main.rs"
 
 [dependencies]
+dante-babelbox-oca.workspace = true
 dante-babelbox-core.workspace = true
 dante-babelbox-discovery.workspace = true
 dante-babelbox-preamp-adapter-osc.workspace = true

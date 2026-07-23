@@ -1,35 +1,39 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use dante_babelbox_oca::{OcaAddress, OcaEvent, OcaValue};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, Mutex};
 use tracing::{debug, warn};
 
-use crate::adapter::DeviceAdapter;
-use crate::types::{PreampAddress, PreampEvent, PreampState};
+use crate::local_adapter::LocalAdapter;
 
 /// One directional (or, if `bidirectional`, mutual) link between two
-/// physical preamp channels, typically on different vendors' gear.
+/// specific OCA objects - typically the gain (or mute) object on one
+/// vendor's channel and the equivalent object on another vendor's,
+/// found and connected by identical role rather than raw channel number.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mapping {
-    pub from: PreampAddress,
-    pub to: PreampAddress,
+    pub from: OcaAddress,
+    pub to: OcaAddress,
     #[serde(default)]
     pub bidirectional: bool,
 }
 
-type SharedAdapter = Arc<Mutex<Box<dyn DeviceAdapter>>>;
+type SharedAdapter = Arc<Mutex<Box<dyn LocalAdapter>>>;
 
-/// Fans PreampEvents out to every mapped peer address. Tracks the last
-/// state it pushed to each address so a device's own confirmation of a
+/// Fans `OcaEvent`s out to every mapped peer address. Tracks the last
+/// value it pushed to each address so a device's own confirmation of a
 /// command the Router just sent isn't mistaken for an independent change
 /// and bounced back to its source (which would otherwise loop forever
-/// between two bidirectionally-mapped devices).
+/// between two bidirectionally-mapped devices). Works uniformly over any
+/// device family (preamp control, mic telemetry, or whatever comes next) -
+/// every event is just "this object, on this device, now has this value."
 pub struct Router {
     devices: RwLock<HashMap<String, SharedAdapter>>,
     listener_handles: RwLock<HashMap<String, tokio::task::AbortHandle>>,
     mappings: RwLock<Vec<Mapping>>,
-    last_pushed: Mutex<HashMap<PreampAddress, PreampState>>,
+    last_pushed: Mutex<HashMap<OcaAddress, OcaValue>>,
 }
 
 impl Router {
@@ -107,7 +111,7 @@ impl Router {
     /// Removes the first mapping matching this exact `from`/`to` pair
     /// (direction matters - matches how the pair was originally added).
     /// Returns `true` if a mapping was found and removed.
-    pub fn remove_mapping(&self, from: &PreampAddress, to: &PreampAddress) -> bool {
+    pub fn remove_mapping(&self, from: &OcaAddress, to: &OcaAddress) -> bool {
         let mut mappings = self.mappings.write().unwrap();
         let Some(index) = mappings.iter().position(|m| &m.from == from && &m.to == to) else {
             return false;
@@ -116,7 +120,7 @@ impl Router {
         true
     }
 
-    async fn listen(&self, source_id: String, mut rx: broadcast::Receiver<PreampEvent>) {
+    async fn listen(&self, source_id: String, mut rx: broadcast::Receiver<OcaEvent>) {
         loop {
             match rx.recv().await {
                 Ok(event) => self.handle_event(event).await,
@@ -128,7 +132,7 @@ impl Router {
         }
     }
 
-    async fn handle_event(&self, event: PreampEvent) {
+    async fn handle_event(&self, event: OcaEvent) {
         if self.is_echo(&event).await {
             debug!(address = ?event.address, "suppressing echo of our own push");
             return;
@@ -140,19 +144,16 @@ impl Router {
                 warn!(device_id = %peer.device_id, "mapping references unknown device");
                 continue;
             };
-            self.record_push(peer.clone(), event.state).await;
+            self.record_push(peer.clone(), event.object.value.clone()).await;
 
             let mut device = device.lock().await;
-            if let Err(e) = device.set_gain(peer.channel, event.state.gain_db).await {
-                warn!(error = %e, channel = peer.channel, "failed to propagate gain");
-            }
-            if let Err(e) = device.set_phantom(peer.channel, event.state.phantom).await {
-                warn!(error = %e, channel = peer.channel, "failed to propagate phantom");
+            if let Err(e) = device.set_object(peer.ono, event.object.value.clone()).await {
+                warn!(error = %e, ono = %peer.ono, "failed to propagate object value");
             }
         }
     }
 
-    fn peers_of(&self, addr: &PreampAddress) -> Vec<PreampAddress> {
+    fn peers_of(&self, addr: &OcaAddress) -> Vec<OcaAddress> {
         let mut peers = Vec::new();
         let mappings = self.mappings.read().unwrap();
         for m in mappings.iter() {
@@ -165,9 +166,9 @@ impl Router {
         peers
     }
 
-    async fn is_echo(&self, event: &PreampEvent) -> bool {
+    async fn is_echo(&self, event: &OcaEvent) -> bool {
         let mut last_pushed = self.last_pushed.lock().await;
-        if last_pushed.get(&event.address) == Some(&event.state) {
+        if last_pushed.get(&event.address) == Some(&event.object.value) {
             last_pushed.remove(&event.address);
             true
         } else {
@@ -175,8 +176,8 @@ impl Router {
         }
     }
 
-    async fn record_push(&self, address: PreampAddress, state: PreampState) {
-        self.last_pushed.lock().await.insert(address, state);
+    async fn record_push(&self, address: OcaAddress, value: OcaValue) {
+        self.last_pushed.lock().await.insert(address, value);
     }
 }
 
@@ -185,21 +186,22 @@ mod tests {
     use super::*;
     use crate::adapter::{AdapterError, AdapterResult, DeviceInfo};
     use async_trait::async_trait;
+    use dante_babelbox_oca::{Ono, OcaClass, OcaObject, OcaObjectDescriptor};
     use std::sync::Mutex as StdMutex;
     use std::time::Duration;
 
     struct MockAdapter {
         id: String,
-        tx: broadcast::Sender<PreampEvent>,
-        state: Arc<StdMutex<HashMap<u16, PreampState>>>,
+        tx: broadcast::Sender<OcaEvent>,
+        state: Arc<StdMutex<HashMap<u32, OcaValue>>>,
         disconnected: Arc<StdMutex<bool>>,
     }
 
     type MockAdapterParts = (
         MockAdapter,
-        broadcast::Sender<PreampEvent>,
-        broadcast::Receiver<PreampEvent>,
-        Arc<StdMutex<HashMap<u16, PreampState>>>,
+        broadcast::Sender<OcaEvent>,
+        broadcast::Receiver<OcaEvent>,
+        Arc<StdMutex<HashMap<u32, OcaValue>>>,
         Arc<StdMutex<bool>>,
     );
 
@@ -213,12 +215,7 @@ mod tests {
             let state = Arc::new(StdMutex::new(HashMap::new()));
             let disconnected = Arc::new(StdMutex::new(false));
             (
-                Self {
-                    id: id.to_string(),
-                    tx: tx.clone(),
-                    state: state.clone(),
-                    disconnected: disconnected.clone(),
-                },
+                Self { id: id.to_string(), tx: tx.clone(), state: state.clone(), disconnected: disconnected.clone() },
                 tx,
                 rx,
                 state,
@@ -228,7 +225,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl DeviceAdapter for MockAdapter {
+    impl LocalAdapter for MockAdapter {
         fn id(&self) -> &str {
             &self.id
         }
@@ -243,46 +240,38 @@ mod tests {
         }
 
         async fn identify(&mut self) -> AdapterResult<DeviceInfo> {
-            Ok(DeviceInfo {
-                vendor: "mock".into(),
-                model: "mock".into(),
-                address: "127.0.0.1".parse().unwrap(),
-            })
+            Ok(DeviceInfo { vendor: "mock".into(), model: "mock".into(), address: "127.0.0.1".parse().unwrap() })
         }
 
-        async fn set_gain(&mut self, channel: u16, gain_db: f32) -> AdapterResult<()> {
-            let mut s = self.state.lock().unwrap();
-            let entry = s.entry(channel).or_insert(PreampState {
-                gain_db: 0.0,
-                phantom: false,
-                pad: None,
-            });
-            entry.gain_db = gain_db;
+        fn describe(&self) -> Vec<OcaObjectDescriptor> {
+            Vec::new()
+        }
+
+        async fn get_object(&mut self, ono: Ono) -> AdapterResult<OcaValue> {
+            self.state.lock().unwrap().get(&ono.0).cloned().ok_or(AdapterError::UnsupportedChannel(0))
+        }
+
+        async fn set_object(&mut self, ono: Ono, value: OcaValue) -> AdapterResult<()> {
+            self.state.lock().unwrap().insert(ono.0, value);
             Ok(())
         }
 
-        async fn set_phantom(&mut self, channel: u16, on: bool) -> AdapterResult<()> {
-            let mut s = self.state.lock().unwrap();
-            let entry = s.entry(channel).or_insert(PreampState {
-                gain_db: 0.0,
-                phantom: false,
-                pad: None,
-            });
-            entry.phantom = on;
-            Ok(())
-        }
-
-        async fn get_state(&mut self, channel: u16) -> AdapterResult<PreampState> {
-            self.state
-                .lock()
-                .unwrap()
-                .get(&channel)
-                .copied()
-                .ok_or(AdapterError::UnsupportedChannel(channel))
-        }
-
-        fn subscribe(&self) -> broadcast::Receiver<PreampEvent> {
+        fn subscribe(&self) -> broadcast::Receiver<OcaEvent> {
             self.tx.subscribe()
+        }
+    }
+
+    fn gain_event(device_id: &str, ono: u32, gain_db: f32) -> OcaEvent {
+        let address = OcaAddress::new(device_id, Ono(ono));
+        OcaEvent {
+            address: address.clone(),
+            object: OcaObject {
+                ono: address.ono,
+                class: OcaClass::Gain,
+                role: "Gain".into(),
+                settable: true,
+                value: OcaValue::F32(gain_db),
+            },
         }
     }
 
@@ -291,37 +280,21 @@ mod tests {
         let (a, a_tx, _a_rx, a_state, _a_disc) = MockAdapter::new("a");
         let (b, b_tx, _b_rx, b_state, _b_disc) = MockAdapter::new("b");
 
-        let mapping = Mapping {
-            from: PreampAddress::new("a", 1),
-            to: PreampAddress::new("b", 5),
-            bidirectional: true,
-        };
+        let mapping =
+            Mapping { from: OcaAddress::new("a", Ono(1)), to: OcaAddress::new("b", Ono(5)), bidirectional: true };
 
         let router = Router::new(vec![mapping]);
-        router.register_device("a", Arc::new(Mutex::new(Box::new(a) as Box<dyn DeviceAdapter>))).await;
-        router.register_device("b", Arc::new(Mutex::new(Box::new(b) as Box<dyn DeviceAdapter>))).await;
+        router.register_device("a", Arc::new(Mutex::new(Box::new(a) as Box<dyn LocalAdapter>))).await;
+        router.register_device("b", Arc::new(Mutex::new(Box::new(b) as Box<dyn LocalAdapter>))).await;
 
-        let state = PreampState {
-            gain_db: 12.5,
-            phantom: true,
-            pad: None,
-        };
-        a_tx.send(PreampEvent {
-            address: PreampAddress::new("a", 1),
-            state,
-        })
-        .unwrap();
+        a_tx.send(gain_event("a", 1, 12.5)).unwrap();
 
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(b_state.lock().unwrap().get(&5), Some(&state));
+        assert_eq!(b_state.lock().unwrap().get(&5), Some(&OcaValue::F32(12.5)));
 
         // 'b' confirms the value the Router just pushed to it - this must
         // be suppressed rather than bounced back to 'a'.
-        b_tx.send(PreampEvent {
-            address: PreampAddress::new("b", 5),
-            state,
-        })
-        .unwrap();
+        b_tx.send(gain_event("b", 5, 12.5)).unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         assert!(a_state.lock().unwrap().get(&1).is_none());
@@ -333,79 +306,58 @@ mod tests {
         let (b, _b_tx, _b_rx, b_state, _b_disc) = MockAdapter::new("b");
         let (c, _c_tx, _c_rx, c_state, _c_disc) = MockAdapter::new("c");
 
-        let mapping = Mapping {
-            from: PreampAddress::new("a", 1),
-            to: PreampAddress::new("b", 5),
-            bidirectional: false,
-        };
+        let mapping =
+            Mapping { from: OcaAddress::new("a", Ono(1)), to: OcaAddress::new("b", Ono(5)), bidirectional: false };
 
         let router = Router::new(vec![mapping]);
-        router.register_device("a", Arc::new(Mutex::new(Box::new(a) as Box<dyn DeviceAdapter>))).await;
-        router.register_device("b", Arc::new(Mutex::new(Box::new(b) as Box<dyn DeviceAdapter>))).await;
-        router.register_device("c", Arc::new(Mutex::new(Box::new(c) as Box<dyn DeviceAdapter>))).await;
+        router.register_device("a", Arc::new(Mutex::new(Box::new(a) as Box<dyn LocalAdapter>))).await;
+        router.register_device("b", Arc::new(Mutex::new(Box::new(b) as Box<dyn LocalAdapter>))).await;
+        router.register_device("c", Arc::new(Mutex::new(Box::new(c) as Box<dyn LocalAdapter>))).await;
 
-        let state = PreampState {
-            gain_db: 1.0,
-            phantom: false,
-            pad: None,
-        };
-        a_tx.send(PreampEvent {
-            address: PreampAddress::new("a", 1),
-            state,
-        })
-        .unwrap();
+        a_tx.send(gain_event("a", 1, 1.0)).unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(b_state.lock().unwrap().get(&5), Some(&state));
+        assert_eq!(b_state.lock().unwrap().get(&5), Some(&OcaValue::F32(1.0)));
         assert!(c_state.lock().unwrap().get(&9).is_none());
 
         // Re-point the mapping from b to c entirely, as a config hot-reload would.
         router.update_mappings(vec![Mapping {
-            from: PreampAddress::new("a", 1),
-            to: PreampAddress::new("c", 9),
+            from: OcaAddress::new("a", Ono(1)),
+            to: OcaAddress::new("c", Ono(9)),
             bidirectional: false,
         }]);
 
-        let state2 = PreampState {
-            gain_db: 2.0,
-            phantom: true,
-            pad: None,
-        };
-        a_tx.send(PreampEvent {
-            address: PreampAddress::new("a", 1),
-            state: state2,
-        })
-        .unwrap();
+        a_tx.send(gain_event("a", 1, 2.0)).unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        assert_eq!(c_state.lock().unwrap().get(&9), Some(&state2));
+        assert_eq!(c_state.lock().unwrap().get(&9), Some(&OcaValue::F32(2.0)));
         // b must not have received the post-reload event.
-        assert_eq!(b_state.lock().unwrap().get(&5), Some(&state));
+        assert_eq!(b_state.lock().unwrap().get(&5), Some(&OcaValue::F32(1.0)));
     }
 
     #[tokio::test]
     async fn add_and_remove_mapping_are_single_item_edits() {
         let router = Router::new(vec![Mapping {
-            from: PreampAddress::new("a", 1),
-            to: PreampAddress::new("b", 1),
+            from: OcaAddress::new("a", Ono(1)),
+            to: OcaAddress::new("b", Ono(1)),
             bidirectional: true,
         }]);
 
         router.add_mapping(Mapping {
-            from: PreampAddress::new("a", 2),
-            to: PreampAddress::new("b", 2),
+            from: OcaAddress::new("a", Ono(2)),
+            to: OcaAddress::new("b", Ono(2)),
             bidirectional: false,
         });
         assert_eq!(router.mappings().len(), 2);
 
-        let removed = router.remove_mapping(&PreampAddress::new("a", 1), &PreampAddress::new("b", 1));
+        let removed = router.remove_mapping(&OcaAddress::new("a", Ono(1)), &OcaAddress::new("b", Ono(1)));
         assert!(removed);
         let remaining = router.mappings();
         assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].from, PreampAddress::new("a", 2));
+        assert_eq!(remaining[0].from, OcaAddress::new("a", Ono(2)));
 
         // Removing a pair that was never added, or already removed, is a
         // no-op reported via the return value, not a panic.
-        assert!(!router.remove_mapping(&PreampAddress::new("a", 1), &PreampAddress::new("b", 1)));
+        assert!(!router.remove_mapping(&OcaAddress::new("a", Ono(1)), &OcaAddress::new("b", Ono(1))));
     }
 
     #[tokio::test]
@@ -414,22 +366,18 @@ mod tests {
         let (b, _b_tx, _b_rx, b_state, b_disc) = MockAdapter::new("b");
 
         let router = Router::new(vec![Mapping {
-            from: PreampAddress::new("a", 1),
-            to: PreampAddress::new("b", 1),
+            from: OcaAddress::new("a", Ono(1)),
+            to: OcaAddress::new("b", Ono(1)),
             bidirectional: false,
         }]);
-        router.register_device("a", Arc::new(Mutex::new(Box::new(a) as Box<dyn DeviceAdapter>))).await;
-        router.register_device("b", Arc::new(Mutex::new(Box::new(b) as Box<dyn DeviceAdapter>))).await;
+        router.register_device("a", Arc::new(Mutex::new(Box::new(a) as Box<dyn LocalAdapter>))).await;
+        router.register_device("b", Arc::new(Mutex::new(Box::new(b) as Box<dyn LocalAdapter>))).await;
 
         let removed = router.deregister_device("b").await;
         assert!(removed);
         assert!(*b_disc.lock().unwrap(), "disconnect() must be called on removal");
 
-        a_tx.send(PreampEvent {
-            address: PreampAddress::new("a", 1),
-            state: PreampState { gain_db: 1.0, phantom: false, pad: None },
-        })
-        .unwrap();
+        a_tx.send(gain_event("a", 1, 1.0)).unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(b_state.lock().unwrap().is_empty(), "removed device must not receive further events");
 
@@ -443,33 +391,22 @@ mod tests {
         let (b, _b_tx, _b_rx, b_state, _b_disc) = MockAdapter::new("b");
 
         let router = Router::new(vec![Mapping {
-            from: PreampAddress::new("a", 1),
-            to: PreampAddress::new("b", 1),
+            from: OcaAddress::new("a", Ono(1)),
+            to: OcaAddress::new("b", Ono(1)),
             bidirectional: false,
         }]);
-        router.register_device("a", Arc::new(Mutex::new(Box::new(a1) as Box<dyn DeviceAdapter>))).await;
-        router.register_device("b", Arc::new(Mutex::new(Box::new(b) as Box<dyn DeviceAdapter>))).await;
+        router.register_device("a", Arc::new(Mutex::new(Box::new(a1) as Box<dyn LocalAdapter>))).await;
+        router.register_device("b", Arc::new(Mutex::new(Box::new(b) as Box<dyn LocalAdapter>))).await;
         // Re-register the same id with a new adapter instance, as a live
         // "add device" via the web API replacing a stale one would.
-        router.register_device("a", Arc::new(Mutex::new(Box::new(a2) as Box<dyn DeviceAdapter>))).await;
+        router.register_device("a", Arc::new(Mutex::new(Box::new(a2) as Box<dyn LocalAdapter>))).await;
 
         // The old instance's sender should have no effect (its listener
         // task was aborted); only the new instance's events propagate.
-        let _ = a1_tx.send(PreampEvent {
-            address: PreampAddress::new("a", 1),
-            state: PreampState { gain_db: 9.0, phantom: false, pad: None },
-        });
-        a2_tx
-            .send(PreampEvent {
-                address: PreampAddress::new("a", 1),
-                state: PreampState { gain_db: 5.0, phantom: true, pad: None },
-            })
-            .unwrap();
+        let _ = a1_tx.send(gain_event("a", 1, 9.0));
+        a2_tx.send(gain_event("a", 1, 5.0)).unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        assert_eq!(
-            b_state.lock().unwrap().get(&1),
-            Some(&PreampState { gain_db: 5.0, phantom: true, pad: None })
-        );
+        assert_eq!(b_state.lock().unwrap().get(&1), Some(&OcaValue::F32(5.0)));
     }
 }

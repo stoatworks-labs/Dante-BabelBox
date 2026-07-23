@@ -1,11 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/oca",
+    "crates/oca-plugin-abi",
     "crates/core",
     "crates/discovery",
     "crates/preamp-adapter-osc",
     "crates/preamp-adapter-ah",
     "crates/preamp-adapter-yamaha",
+    "crates/plugin-osc-x32",
     "crates/preamp-cli",
     "crates/preamp-web",
     "crates/mic-core",
@@ -33,7 +36,10 @@ clap = { version = "4", features = ["derive"] }
 axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.5", features = ["util"] }
 tokio-util = "0.7"
+abi_stable = "0.11"
 
+dante-babelbox-oca = { path = "crates/oca" }
+dante-babelbox-oca-plugin-abi = { path = "crates/oca-plugin-abi" }
 dante-babelbox-core = { path = "crates/core" }
 dante-babelbox-discovery = { path = "crates/discovery" }
 dante-babelbox-preamp-adapter-osc = { path = "crates/preamp-adapter-osc" }

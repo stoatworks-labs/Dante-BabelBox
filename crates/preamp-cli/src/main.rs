@@ -37,6 +37,11 @@ enum Command {
         /// Don't serve the patch-bay web UI at all.
         #[arg(long)]
         no_web: bool,
+        /// Directory to scan for dynamically-loadable device plugin
+        /// `.so`/`.dylib`/`.dll` files, alongside the built-in
+        /// (not-yet-migrated) vendor adapters.
+        #[arg(long, default_value = "plugins")]
+        plugins_dir: PathBuf,
     },
     /// Discover devices and auto-generate the [[device]] blocks of a
     /// bridge.toml. [[mapping]] entries must still be added by hand,
@@ -80,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
             config: config_path,
             web_bind,
             no_web,
+            plugins_dir,
         } => {
             let cfg = config::Config::load(&config_path)?;
             println!(
@@ -105,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
                     m.to.channel
                 );
             }
-            daemon::run(cfg, Some(config_path), if no_web { None } else { Some(web_bind) }).await?;
+            daemon::run(cfg, Some(config_path), if no_web { None } else { Some(web_bind) }, plugins_dir).await?;
         }
         Command::Init {
             output,

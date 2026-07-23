@@ -1,103 +1,130 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
+use dante_babelbox_core::{channel_mapping, channel_scheme, DeviceConfig, LegacyPreampShim, LocalAdapter, PluginRegistry, Router};
+use dante_babelbox_oca::OcaObjectDescriptor;
 use dante_babelbox_preamp_adapter_ah::{AhmAdapter, DliveAdapter};
-use dante_babelbox_preamp_adapter_osc::{WingAdapter, X32Adapter};
+use dante_babelbox_preamp_adapter_osc::WingAdapter;
 use dante_babelbox_preamp_adapter_yamaha::Dm3Adapter;
-use dante_babelbox_core::{DeviceAdapter, DeviceConfig, DeviceKind, Router};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::config::Config;
-use crate::ports::{DEFAULT_AHM_PORT, DEFAULT_DLIVE_PORT, DEFAULT_DM3_PORT, DEFAULT_WING_PORT, DEFAULT_X32_PORT};
+use crate::ports::{DEFAULT_AHM_PORT, DEFAULT_DLIVE_PORT, DEFAULT_DM3_PORT, DEFAULT_WING_PORT};
 
-/// Builds (but does not connect) the adapter for a single real device.
-/// Real-devices-only: callers must filter out `is_virtual` devices first
-/// (a virtual device has no protocol to build an adapter for yet - it's
-/// a placeholder for the not-yet-built emulation layer). Shared between
-/// the startup loop below and the web management API's "add device"
-/// handler, so both construct adapters identically.
-pub fn build_adapter(device: &DeviceConfig) -> Result<Box<dyn DeviceAdapter>> {
-    let ip = device
-        .address
-        .with_context(|| format!("device '{}' has no address", device.id))?;
+/// Registers every not-yet-migrated preamp vendor as a static plugin kind
+/// (wrapped in [`LegacyPreampShim`]), plus the two known-but-unimplemented
+/// kinds (`ah-midi`/`yamaha`) with the same clear explanatory error they
+/// always had - so looking one of those up still surfaces specific
+/// guidance rather than a generic "no plugin registered" message. `osc-x32`
+/// is deliberately *not* registered here: it's the proof-of-concept
+/// `cdylib` plugin, loaded from `plugins_dir` instead.
+pub fn build_registry(plugins_dir: &Path) -> Arc<PluginRegistry> {
+    let registry = Arc::new(PluginRegistry::new());
 
-    Ok(match device.kind {
-        DeviceKind::OscX32 => {
-            let addr = SocketAddr::new(ip, device.port.unwrap_or(DEFAULT_X32_PORT));
-            Box::new(X32Adapter::new(device.id.clone(), addr))
-        }
-        DeviceKind::AhTcp => {
-            let addr = SocketAddr::new(ip, device.port.unwrap_or(DEFAULT_AHM_PORT));
-            Box::new(AhmAdapter::new(device.id.clone(), addr))
-        }
-        DeviceKind::OscWing => {
-            let addr = SocketAddr::new(ip, device.port.unwrap_or(DEFAULT_WING_PORT));
-            Box::new(WingAdapter::new(device.id.clone(), addr))
-        }
-        DeviceKind::DliveTcp => {
-            let addr = SocketAddr::new(ip, device.port.unwrap_or(DEFAULT_DLIVE_PORT));
-            Box::new(DliveAdapter::new(device.id.clone(), addr))
-        }
-        DeviceKind::YamahaDm3 => {
-            let addr = SocketAddr::new(ip, device.port.unwrap_or(DEFAULT_DM3_PORT));
-            Box::new(Dm3Adapter::new(device.id.clone(), addr))
-        }
-        DeviceKind::AhMidi => bail!(
+    fn legacy_ctor<A: dante_babelbox_core::DeviceAdapter + 'static>(
+        device: &DeviceConfig,
+        default_port: u16,
+        new: impl FnOnce(String, SocketAddr) -> A,
+    ) -> Result<Box<dyn LocalAdapter>> {
+        let ip = device.address.with_context(|| format!("device '{}' has no address", device.id))?;
+        let addr = SocketAddr::new(ip, device.port.unwrap_or(default_port));
+        let channels = device
+            .channel_count()
+            .with_context(|| format!("device '{}': no channel count - specify 'channels' explicitly", device.id))?;
+        Ok(Box::new(LegacyPreampShim::new(Box::new(new(device.id.clone(), addr)), channels)))
+    }
+
+    registry.register_static("osc-wing", |d| legacy_ctor(d, DEFAULT_WING_PORT, WingAdapter::new));
+    registry.register_static("ah-tcp", |d| legacy_ctor(d, DEFAULT_AHM_PORT, AhmAdapter::new));
+    registry.register_static("dlive-tcp", |d| legacy_ctor(d, DEFAULT_DLIVE_PORT, DliveAdapter::new));
+    registry.register_static("yamaha-dm3", |d| legacy_ctor(d, DEFAULT_DM3_PORT, Dm3Adapter::new));
+    registry.register_static("ah-midi", |device| {
+        bail!(
             "device '{}': Qu/SQ preamp control is not implemented - A&H's public SQ/Qu MIDI protocol \
              doc doesn't document preamp gain/pad/phantom messages at all (unlike dLive, which has its \
              own documented Socket-based preamp protocol - use 'dlive-tcp' for that), so this needs \
              real-hardware verification before it can be built, not guessing",
             device.id
-        ),
-        DeviceKind::Yamaha => bail!(
+        )
+    });
+    registry.register_static("yamaha", |device| {
+        bail!(
             "device '{}': Yamaha adapter not implemented yet - blocked on packet captures from real hardware",
             device.id
-        ),
-    })
+        )
+    });
+
+    let loaded = registry.load_dylibs(plugins_dir);
+    if loaded.is_empty() {
+        info!(dir = %plugins_dir.display(), "no dylib plugins loaded");
+    } else {
+        info!(kinds = ?loaded, "loaded dylib plugins");
+    }
+
+    registry
 }
 
 /// Connects every configured (non-virtual) device, wires them through a
 /// [`Router`] using the config's mappings, and runs until interrupted.
 /// Virtual devices are skipped here entirely - they exist only for the
-/// web UI's mapping purposes, not as something this loop can dial. If
-/// `config_path` is given, mapping changes to that file take effect live.
-/// If `web_bind` is given, the patch-bay web UI (device/mapping CRUD,
-/// live for virtual devices and mappings - see `dante_babelbox_preamp_web`'s
-/// module doc for what's still restart-only in this phase) is served
-/// there alongside the bridge.
-pub async fn run(cfg: Config, config_path: Option<PathBuf>, web_bind: Option<SocketAddr>) -> Result<()> {
-    let router = Router::new(cfg.mappings);
+/// web UI's mapping purposes, not as something this loop can dial, but
+/// still get a synthesized descriptor set (via [`channel_scheme`]) so
+/// mappings referencing them resolve the same way a real device's would.
+/// If `config_path` is given, mapping changes to that file take effect
+/// live. If `web_bind` is given, the patch-bay web UI (device/mapping
+/// CRUD, live for virtual devices and mappings - see
+/// `dante_babelbox_preamp_web`'s module doc for what's still restart-only
+/// in this phase) is served there alongside the bridge.
+pub async fn run(
+    cfg: Config,
+    config_path: Option<PathBuf>,
+    web_bind: Option<SocketAddr>,
+    plugins_dir: PathBuf,
+) -> Result<()> {
+    let registry = build_registry(&plugins_dir);
+    let router = Router::new(Vec::new());
     let device_configs = cfg.devices.clone();
+    let mut descriptors: HashMap<String, Vec<OcaObjectDescriptor>> = HashMap::new();
 
     for device in &cfg.devices {
         if device.is_virtual {
             info!(device = %device.id, "skipping virtual device - not yet backed by an emulation adapter");
+            descriptors.insert(
+                device.id.clone(),
+                channel_scheme::descriptors_for_channels(device.channel_count().unwrap_or(0)),
+            );
             continue;
         }
 
-        let mut adapter = build_adapter(device)?;
+        let mut adapter = registry.create(&device.kind, device)?;
         adapter
             .connect()
             .await
             .with_context(|| format!("connecting to device '{}' at {:?}", device.id, device.address))?;
-        info!(device = %device.id, kind = ?device.kind, address = ?device.address, "connected");
+        info!(device = %device.id, kind = %device.kind, address = ?device.address, "connected");
+        descriptors.insert(device.id.clone(), adapter.describe());
 
         router.register_device(device.id.clone(), Arc::new(Mutex::new(adapter))).await;
     }
 
+    apply_channel_mappings(&router, &cfg.mappings, &descriptors);
+
     if let Some(path) = config_path {
         let router = Arc::clone(&router);
-        tokio::spawn(watch_and_apply_mappings(path, router));
+        tokio::spawn(watch_and_apply_mappings(path, router, descriptors.clone()));
     }
 
     if let Some(bind) = web_bind {
         let state = dante_babelbox_preamp_web::PatchState {
             router: Arc::clone(&router),
             devices: dante_babelbox_preamp_web::DeviceRegistry::new(device_configs),
-            build_adapter: Arc::new(build_adapter),
+            registry: Arc::clone(&registry),
+            descriptors: Arc::new(std::sync::RwLock::new(descriptors.clone())),
+            channel_mappings: Arc::new(std::sync::RwLock::new(cfg.mappings.clone())),
         };
         tokio::spawn(async move {
             if let Err(e) = dante_babelbox_preamp_web::serve(bind, state).await {
@@ -115,11 +142,50 @@ pub async fn run(cfg: Config, config_path: Option<PathBuf>, web_bind: Option<Soc
     Ok(())
 }
 
+/// Resolves every device+channel-level [`crate::config::Config::mappings`]
+/// entry into the Router's OCA-object-level mappings, using each
+/// referenced device's already-known descriptor set. A mapping
+/// referencing an unknown device (or one whose descriptors couldn't
+/// resolve any matching object - e.g. an out-of-range channel) is logged
+/// and skipped rather than failing the whole run.
+fn apply_channel_mappings(
+    router: &Arc<Router>,
+    mappings: &[dante_babelbox_core::ChannelMapping],
+    descriptors: &HashMap<String, Vec<OcaObjectDescriptor>>,
+) {
+    for mapping in mappings {
+        let (Some(from), Some(to)) =
+            (descriptors.get(&mapping.from.device_id), descriptors.get(&mapping.to.device_id))
+        else {
+            warn!(from = %mapping.from.device_id, to = %mapping.to.device_id, "mapping references an unknown device");
+            continue;
+        };
+        let resolved = channel_mapping::resolve(mapping, from, to);
+        if resolved.is_empty() {
+            warn!(
+                from = %mapping.from.device_id, from_channel = mapping.from.channel,
+                to = %mapping.to.device_id, to_channel = mapping.to.channel,
+                "mapping resolved to no shared objects - check the channel numbers are in range"
+            );
+        }
+        for m in resolved {
+            router.add_mapping(m);
+        }
+    }
+}
+
 /// Applies mapping changes from `config::watch` to a running Router as
 /// they arrive. The channel's initial value is the config already applied
 /// at startup, so the first real update only appears after an edit -
 /// `changed()` doesn't fire for the value the receiver was created with.
-async fn watch_and_apply_mappings(path: PathBuf, router: Arc<Router>) {
+/// Re-resolves against the same descriptor snapshot taken at startup -
+/// device connections don't change on a mapping-only hot-reload, so their
+/// descriptors don't either.
+async fn watch_and_apply_mappings(
+    path: PathBuf,
+    router: Arc<Router>,
+    descriptors: HashMap<String, Vec<OcaObjectDescriptor>>,
+) {
     let mut rx = match crate::config::watch(path) {
         Ok(rx) => rx,
         Err(e) => {
@@ -131,112 +197,25 @@ async fn watch_and_apply_mappings(path: PathBuf, router: Arc<Router>) {
     while rx.changed().await.is_ok() {
         let mappings = rx.borrow().mappings.clone();
         info!(count = mappings.len(), "applying hot-reloaded mapping config");
-        router.update_mappings(mappings);
+        router.update_mappings(Vec::new());
+        apply_channel_mappings(&router, &mappings, &descriptors);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dante_babelbox_core::{DeviceConfig, Mapping, PreampAddress};
+    use dante_babelbox_core::{ChannelMapping, DeviceConfig, PreampAddress};
     use std::time::Duration;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
     use tokio::net::{TcpListener, UdpSocket};
 
-    /// End-to-end: a real X32Adapter and a real AhmAdapter, wired through
-    /// the Router by daemon::run(), against mock UDP/TCP peers standing in
-    /// for an actual X32 console and AHM rack. Proves the full path from
-    /// config -> adapter construction -> connect -> Router propagation
-    /// works across two different vendor protocols, not just the mocked
-    /// DeviceAdapter used in the core Router unit test.
-    #[tokio::test]
-    async fn bridges_gain_change_from_x32_to_ahm() {
-        let ahm_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let ahm_addr = ahm_listener.local_addr().unwrap();
-
-        let x32_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let x32_addr = x32_socket.local_addr().unwrap();
-
-        let cfg = Config {
-            devices: vec![
-                DeviceConfig {
-                    id: "x32".into(),
-                    kind: DeviceKind::OscX32,
-                    address: Some(x32_addr.ip()),
-                    port: Some(x32_addr.port()),
-                    is_virtual: false,
-                    channels: None,
-                },
-                DeviceConfig {
-                    id: "ahm".into(),
-                    kind: DeviceKind::AhTcp,
-                    address: Some(ahm_addr.ip()),
-                    port: Some(ahm_addr.port()),
-                    is_virtual: false,
-                    channels: None,
-                },
-            ],
-            mappings: vec![Mapping {
-                from: PreampAddress::new("x32", 3),
-                to: PreampAddress::new("ahm", 7),
-                bidirectional: true,
-            }],
-        };
-
-        let bridge = tokio::spawn(run(cfg, None, None));
-
-        let (mut ahm_socket, _) = tokio::time::timeout(Duration::from_secs(2), ahm_listener.accept())
-            .await
-            .expect("timed out waiting for bridge to connect to mock AHM device")
-            .unwrap();
-
-        // First inbound packet is the X32 adapter's /xremote heartbeat,
-        // which tells us which ephemeral local port it's using.
-        let bridge_client_addr = {
-            let mut buf = [0u8; 512];
-            let (_, from) = tokio::time::timeout(Duration::from_secs(2), x32_socket.recv_from(&mut buf))
-                .await
-                .expect("timed out waiting for /xremote heartbeat")
-                .unwrap();
-            from
-        };
-
-        // Simulate the X32 console spontaneously reporting a gain change on
-        // channel 3, as it would after a physical/on-screen knob turn.
-        let packet = rosc::encoder::encode(&rosc::OscPacket::Message(rosc::OscMessage {
-            addr: "/headamp/03/gain".to_string(),
-            args: vec![rosc::OscType::Float(20.0)],
-        }))
-        .unwrap();
-        x32_socket.send_to(&packet, bridge_client_addr).await.unwrap();
-
-        // Expect the Router to relay it to the mapped AHM channel 7
-        // (CH=06) as a set-gain NRPN sequence.
-        let mut buf = [0u8; 9];
-        tokio::time::timeout(Duration::from_secs(2), ahm_socket.read_exact(&mut buf))
-            .await
-            .expect("timed out waiting for AHM relay")
-            .unwrap();
-
-        assert_eq!(buf[0], 0xB0);
-        assert_eq!(buf[1], 0x63);
-        assert_eq!(buf[2], 0x06, "expected channel index 6 (channel 7)");
-        assert_eq!(buf[3], 0xB0);
-        assert_eq!(buf[4], 0x62);
-        assert_eq!(buf[5], 0x19, "expected preamp gain parameter id");
-        assert_eq!(buf[6], 0xB0);
-        assert_eq!(buf[7], 0x06);
-
-        bridge.abort();
-    }
-
-    /// Same shape as the X32<->AHM test above, but exercising the two
-    /// newest adapters (Allen & Heath dLive and Yamaha DM3) to prove
-    /// genuine three-vendor interoperability, not just a single pair.
-    /// dLive (TCP) is used as the source since we already hold its
-    /// accepted socket; DM3 (UDP, connectionless) is used as the
-    /// receive-only destination so the test never needs to learn the
-    /// bridge's ephemeral outbound UDP port.
+    /// End-to-end: a real AhmAdapter and a real Dm3Adapter (both wrapped
+    /// in `LegacyPreampShim`), wired through the Router by `daemon::run()`,
+    /// against mock TCP/UDP peers standing in for real hardware. Proves
+    /// the full path from config -> plugin registry -> shim -> connect ->
+    /// Router propagation works, not just the mocked `LocalAdapter` used
+    /// in the core Router unit tests.
     #[tokio::test]
     async fn bridges_phantom_change_from_dlive_to_dm3() {
         let dlive_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -249,7 +228,7 @@ mod tests {
             devices: vec![
                 DeviceConfig {
                     id: "dlive".into(),
-                    kind: DeviceKind::DliveTcp,
+                    kind: "dlive-tcp".into(),
                     address: Some(dlive_addr.ip()),
                     port: Some(dlive_addr.port()),
                     is_virtual: false,
@@ -257,21 +236,21 @@ mod tests {
                 },
                 DeviceConfig {
                     id: "dm3".into(),
-                    kind: DeviceKind::YamahaDm3,
+                    kind: "yamaha-dm3".into(),
                     address: Some(dm3_addr.ip()),
                     port: Some(dm3_addr.port()),
                     is_virtual: false,
                     channels: None,
                 },
             ],
-            mappings: vec![Mapping {
+            mappings: vec![ChannelMapping {
                 from: PreampAddress::new("dlive", 12),
                 to: PreampAddress::new("dm3", 5),
                 bidirectional: true,
             }],
         };
 
-        let bridge = tokio::spawn(run(cfg, None, None));
+        let bridge = tokio::spawn(run(cfg, None, None, PathBuf::from("/nonexistent-plugins-dir")));
 
         let (mut dlive_socket, _) = tokio::time::timeout(Duration::from_secs(2), dlive_listener.accept())
             .await
@@ -284,9 +263,9 @@ mod tests {
         msg.extend_from_slice(&[0x00, 0x0B, 0x0B, 0x7F, 0xF7]); // opcode 0x0B = 48V status
         dlive_socket.write_all(&msg).await.unwrap();
 
-        // The Router propagates a full PreampState, so it sends both a
-        // set-gain and a set-48VOn message to DM3 (in that order); we
-        // only care about the phantom one here.
+        // The shim propagates gain and phantom as separate OCA events, so
+        // the Router sends both a set-gain and a set-48VOn message to
+        // DM3 (in some order); we only care about the phantom one here.
         let mut buf = [0u8; 512];
         let mut found = false;
         for _ in 0..2 {
@@ -307,5 +286,36 @@ mod tests {
         assert!(found, "did not see a 48VOn relay to DM3 channel 5");
 
         bridge.abort();
+    }
+
+    /// `build_registry` covers exactly the kinds it always did (five real
+    /// vendors plus the two explained-but-unimplemented ones), and the
+    /// `osc-x32` proof-of-concept plugin is never statically registered -
+    /// it only exists if a dylib for it was actually loaded.
+    #[test]
+    fn build_registry_covers_the_expected_static_kinds() {
+        let registry = build_registry(Path::new("/nonexistent-plugins-dir"));
+        let mut kinds = registry.known_kinds();
+        kinds.sort();
+        assert_eq!(kinds, vec!["ah-midi", "ah-tcp", "dlive-tcp", "osc-wing", "yamaha", "yamaha-dm3"]);
+    }
+
+    #[test]
+    fn ah_midi_and_yamaha_fail_with_their_explanatory_message_not_a_generic_one() {
+        let registry = build_registry(Path::new("/nonexistent-plugins-dir"));
+        let device = |kind: &str| DeviceConfig {
+            id: "d".into(),
+            kind: kind.into(),
+            address: Some("10.0.0.1".parse().unwrap()),
+            port: None,
+            is_virtual: false,
+            channels: Some(8),
+        };
+
+        let Err(err) = registry.create("ah-midi", &device("ah-midi")) else { panic!("expected an error") };
+        assert!(err.to_string().contains("Qu/SQ preamp control is not implemented"));
+
+        let Err(err) = registry.create("yamaha", &device("yamaha")) else { panic!("expected an error") };
+        assert!(err.to_string().contains("blocked on packet captures from real hardware"));
     }
 }

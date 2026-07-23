@@ -1,0 +1,20 @@
+[package]
+name = "dante-babelbox-plugin-osc-x32"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "dante_babelbox_plugin_osc_x32"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dante-babelbox-oca.workspace = true
+dante-babelbox-oca-plugin-abi.workspace = true
+dante-babelbox-core.workspace = true
+dante-babelbox-preamp-adapter-osc.workspace = true
+abi_stable.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+rosc = "0.10"

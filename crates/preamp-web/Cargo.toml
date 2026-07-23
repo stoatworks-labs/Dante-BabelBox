@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+dante-babelbox-oca.workspace = true
 dante-babelbox-core.workspace = true
 axum.workspace = true
 tokio.workspace = true

@@ -7,9 +7,18 @@
 //! in shape and that precedent's stated security assumption).
 //!
 //! Devices (real and virtual) and mappings can all be added and removed
-//! live. Removing a real device calls its `DeviceAdapter::disconnect()`
+//! live. Removing a real device calls its `LocalAdapter::disconnect()`
 //! (via `Router::deregister_device`) so its background socket task and
 //! held port are actually released, not just dropped from a list.
+//!
+//! The wire format stays device+channel-shaped (unchanged from before the
+//! OCA/plugin rework), even though the `Router` underneath now only
+//! understands OCA-object-level mappings: this crate keeps its own
+//! `channel_mappings` list as the "display source of truth" alongside a
+//! `descriptors` map (each device's `LocalAdapter::describe()` output, or
+//! a synthesized set for virtual devices), and translates between the two
+//! shapes via `dante_babelbox_core::channel_mapping::resolve` - the same
+//! function `preamp-cli`'s daemon uses for config-file mappings.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -22,7 +31,8 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router as AxumRouter};
-use dante_babelbox_core::{DeviceAdapter, DeviceConfig, DeviceKind, Mapping, PreampAddress, Router};
+use dante_babelbox_core::{channel_mapping, channel_scheme, ChannelMapping, DeviceConfig, PluginRegistry, PreampAddress, Router};
+use dante_babelbox_oca::OcaObjectDescriptor;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::info;
@@ -37,8 +47,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How often the websocket handler checks for a state change to push.
 const PUSH_POLL_INTERVAL: Duration = Duration::from_millis(200);
-
-pub type BuildAdapter = Arc<dyn Fn(&DeviceConfig) -> anyhow::Result<Box<dyn DeviceAdapter>> + Send + Sync>;
 
 /// Every device the bridge knows about - real and virtual, config-seeded
 /// at startup and API-added later alike - keyed by id. The single source
@@ -81,17 +89,28 @@ impl DeviceRegistry {
 pub struct PatchState {
     pub router: Arc<Router>,
     pub devices: Arc<DeviceRegistry>,
-    /// Constructs (but doesn't connect) an adapter for a real device.
-    /// Injected as a closure rather than this crate depending on every
-    /// `adapter-*` crate directly - a real vendor's protocol is exactly
-    /// as pluggable here as a future emulated one.
-    pub build_adapter: BuildAdapter,
+    /// Builds device kinds - some statically registered, some loaded from
+    /// dylib plugins. Replaces the old `build_adapter` closure: a real
+    /// vendor's protocol is exactly as pluggable here as a future
+    /// dynamically-loaded one.
+    pub registry: Arc<PluginRegistry>,
+    /// Each known device's OCA object descriptors - real devices' actual
+    /// `describe()` output once connected, virtual devices' synthesized
+    /// `channel_scheme` set. Needed to resolve a device+channel-shaped
+    /// mapping request into the Router's OCA-object-level `Mapping`s.
+    pub descriptors: Arc<RwLock<HashMap<String, Vec<OcaObjectDescriptor>>>>,
+    /// The device+channel-shaped mappings as the API/UI sees them - the
+    /// Router's own mapping list is OCA-object-level (up to two entries,
+    /// gain and phantom, per entry here), so this is kept as the separate
+    /// "display source of truth" rather than derived by reverse-decoding
+    /// Onos on every request.
+    pub channel_mappings: Arc<RwLock<Vec<ChannelMapping>>>,
 }
 
 #[derive(Serialize)]
 struct DeviceView {
     id: String,
-    kind: DeviceKind,
+    kind: String,
     #[serde(rename = "virtual")]
     is_virtual: bool,
     channels: Option<u16>,
@@ -103,7 +122,7 @@ impl From<&DeviceConfig> for DeviceView {
     fn from(d: &DeviceConfig) -> Self {
         Self {
             id: d.id.clone(),
-            kind: d.kind,
+            kind: d.kind.clone(),
             is_virtual: d.is_virtual,
             channels: d.channel_count(),
             address: d.address,
@@ -115,13 +134,13 @@ impl From<&DeviceConfig> for DeviceView {
 #[derive(Serialize)]
 struct StateResponse {
     devices: Vec<DeviceView>,
-    mappings: Vec<Mapping>,
+    mappings: Vec<ChannelMapping>,
 }
 
 fn snapshot(state: &PatchState) -> StateResponse {
     StateResponse {
         devices: state.devices.list().iter().map(DeviceView::from).collect(),
-        mappings: state.router.mappings(),
+        mappings: state.channel_mappings.read().unwrap().clone(),
     }
 }
 
@@ -155,7 +174,7 @@ async fn get_state(State(state): State<PatchState>) -> Json<StateResponse> {
 #[derive(Deserialize)]
 struct AddDeviceRequest {
     id: String,
-    kind: DeviceKind,
+    kind: String,
     #[serde(default, rename = "virtual")]
     is_virtual: bool,
     #[serde(default)]
@@ -186,19 +205,22 @@ async fn add_device(
         channels: req.channels,
     };
 
-    if device.channel_count().is_none() {
+    let Some(channels) = device.channel_count() else {
         return Err(bad_request(format!(
-            "device '{}': {:?} has no documented default channel count - specify 'channels' explicitly",
+            "device '{}': '{}' has no documented default channel count - specify 'channels' explicitly",
             device.id, device.kind
         )));
-    }
+    };
 
-    if !device.is_virtual {
-        let mut adapter = (state.build_adapter)(&device).map_err(|e| bad_request(e.to_string()))?;
+    if device.is_virtual {
+        state.descriptors.write().unwrap().insert(device.id.clone(), channel_scheme::descriptors_for_channels(channels));
+    } else {
+        let mut adapter = state.registry.create(&device.kind, &device).map_err(|e| bad_request(e.to_string()))?;
         tokio::time::timeout(CONNECT_TIMEOUT, adapter.connect())
             .await
             .map_err(|_| bad_request(format!("timed out connecting to device '{}'", device.id)))?
             .map_err(|e| bad_request(format!("failed to connect to device '{}': {e}", device.id)))?;
+        state.descriptors.write().unwrap().insert(device.id.clone(), adapter.describe());
         state
             .router
             .register_device(device.id.clone(), Arc::new(AsyncMutex::new(adapter)))
@@ -224,6 +246,8 @@ async fn remove_device(State(state): State<PatchState>, Path(id): Path<String>) 
             state.router.remove_mapping(&m.from, &m.to);
         }
     }
+    state.channel_mappings.write().unwrap().retain(|m| m.from.device_id != id && m.to.device_id != id);
+    state.descriptors.write().unwrap().remove(&id);
     state.devices.remove(&id);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -236,6 +260,10 @@ struct AddMappingRequest {
     bidirectional: bool,
 }
 
+fn descriptors_for(state: &PatchState, device_id: &str) -> Vec<OcaObjectDescriptor> {
+    state.descriptors.read().unwrap().get(device_id).cloned().unwrap_or_default()
+}
+
 async fn add_mapping(State(state): State<PatchState>, Json(req): Json<AddMappingRequest>) -> Result<StatusCode, ApiError> {
     if !state.devices.contains(&req.from.device_id) {
         return Err(bad_request(format!("unknown device '{}'", req.from.device_id)));
@@ -243,21 +271,34 @@ async fn add_mapping(State(state): State<PatchState>, Json(req): Json<AddMapping
     if !state.devices.contains(&req.to.device_id) {
         return Err(bad_request(format!("unknown device '{}'", req.to.device_id)));
     }
-    let exists = state.router.mappings().iter().any(|m| m.from == req.from && m.to == req.to);
+
+    let candidate = ChannelMapping { from: req.from, to: req.to, bidirectional: req.bidirectional };
+    let exists =
+        state.channel_mappings.read().unwrap().iter().any(|m| m.from == candidate.from && m.to == candidate.to);
     if exists {
         return Err(conflict("mapping already exists"));
     }
-    state.router.add_mapping(Mapping {
-        from: req.from,
-        to: req.to,
-        bidirectional: req.bidirectional,
-    });
+
+    let resolved = channel_mapping::resolve(
+        &candidate,
+        &descriptors_for(&state, &candidate.from.device_id),
+        &descriptors_for(&state, &candidate.to.device_id),
+    );
+    if resolved.is_empty() {
+        return Err(bad_request(
+            "mapping resolved to no shared objects - check that both channel numbers are in range",
+        ));
+    }
+    for m in resolved {
+        state.router.add_mapping(m);
+    }
+    state.channel_mappings.write().unwrap().push(candidate);
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Mapping ids are synthesized (`Mapping` has no id of its own), in the
-/// form `"{from.device}:{from.channel}->{to.device}:{to.channel}"` - the
-/// frontend already has everything it needs to build one from
+/// Mapping ids are synthesized (`ChannelMapping` has no id of its own), in
+/// the form `"{from.device}:{from.channel}->{to.device}:{to.channel}"` -
+/// the frontend already has everything it needs to build one from
 /// `/api/state` without a separate lookup. Assumes device ids don't
 /// contain `:` (every id in this project's convention is kebab-case).
 /// The `>` isn't a valid raw URI character, so callers building the
@@ -267,11 +308,19 @@ async fn remove_mapping(State(state): State<PatchState>, Path(id): Path<String>)
     let Some((from, to)) = parse_mapping_id(&id) else {
         return Err(bad_request("malformed mapping id"));
     };
-    if state.router.remove_mapping(&from, &to) {
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Err(not_found(format!("mapping '{id}' not found")))
+
+    let removed = {
+        let mut channel_mappings = state.channel_mappings.write().unwrap();
+        let Some(index) = channel_mappings.iter().position(|m| m.from == from && m.to == to) else {
+            return Err(not_found(format!("mapping '{id}' not found")));
+        };
+        channel_mappings.remove(index)
+    };
+
+    for m in channel_mapping::resolve(&removed, &descriptors_for(&state, &from.device_id), &descriptors_for(&state, &to.device_id)) {
+        state.router.remove_mapping(&m.from, &m.to);
     }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn parse_mapping_id(id: &str) -> Option<(PreampAddress, PreampAddress)> {
@@ -341,7 +390,8 @@ mod tests {
     use async_trait::async_trait;
     use axum::body::Body;
     use axum::http::Request;
-    use dante_babelbox_core::{AdapterError, AdapterResult, DeviceInfo, PreampEvent, PreampState};
+    use dante_babelbox_core::{AdapterError, AdapterResult, DeviceInfo, LocalAdapter};
+    use dante_babelbox_oca::{Ono, OcaEvent, OcaValue};
     use std::collections::HashSet;
     use std::sync::Mutex as StdMutex;
     use tokio::sync::broadcast;
@@ -349,7 +399,7 @@ mod tests {
 
     struct FakeAdapter {
         id: String,
-        tx: broadcast::Sender<PreampEvent>,
+        tx: broadcast::Sender<OcaEvent>,
         disconnected: Arc<StdMutex<HashSet<String>>>,
     }
 
@@ -365,7 +415,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl DeviceAdapter for FakeAdapter {
+    impl LocalAdapter for FakeAdapter {
         fn id(&self) -> &str {
             &self.id
         }
@@ -377,40 +427,44 @@ mod tests {
             Ok(())
         }
         async fn identify(&mut self) -> AdapterResult<DeviceInfo> {
-            Ok(DeviceInfo {
-                vendor: "fake".into(),
-                model: "fake".into(),
-                address: "127.0.0.1".parse().unwrap(),
-            })
+            Ok(DeviceInfo { vendor: "fake".into(), model: "fake".into(), address: "127.0.0.1".parse().unwrap() })
         }
-        async fn set_gain(&mut self, _channel: u16, _gain_db: f32) -> AdapterResult<()> {
+        fn describe(&self) -> Vec<OcaObjectDescriptor> {
+            channel_scheme::descriptors_for_channels(24)
+        }
+        async fn get_object(&mut self, _ono: Ono) -> AdapterResult<OcaValue> {
+            Err(AdapterError::UnsupportedChannel(0))
+        }
+        async fn set_object(&mut self, _ono: Ono, _value: OcaValue) -> AdapterResult<()> {
             Ok(())
         }
-        async fn set_phantom(&mut self, _channel: u16, _on: bool) -> AdapterResult<()> {
-            Ok(())
-        }
-        async fn get_state(&mut self, channel: u16) -> AdapterResult<PreampState> {
-            Err(AdapterError::UnsupportedChannel(channel))
-        }
-        fn subscribe(&self) -> broadcast::Receiver<PreampEvent> {
+        fn subscribe(&self) -> broadcast::Receiver<OcaEvent> {
             self.tx.subscribe()
         }
     }
 
-    fn test_state() -> PatchState {
+    fn registry_with(kind: &'static str, ctor: impl Fn(&DeviceConfig) -> anyhow::Result<Box<dyn LocalAdapter>> + Send + Sync + 'static) -> Arc<PluginRegistry> {
+        let registry = PluginRegistry::new();
+        registry.register_static(kind, ctor);
+        Arc::new(registry)
+    }
+
+    fn empty_state(registry: Arc<PluginRegistry>) -> PatchState {
         PatchState {
             router: Router::new(Vec::new()),
             devices: DeviceRegistry::new(Vec::new()),
-            build_adapter: Arc::new(|device| Ok(Box::new(FakeAdapter::new(&device.id)))),
+            registry,
+            descriptors: Arc::new(RwLock::new(HashMap::new())),
+            channel_mappings: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
+    fn test_state() -> PatchState {
+        empty_state(registry_with("osc-x32", |device| Ok(Box::new(FakeAdapter::new(&device.id)) as Box<dyn LocalAdapter>)))
+    }
+
     fn test_state_with_failing_adapter() -> PatchState {
-        PatchState {
-            router: Router::new(Vec::new()),
-            devices: DeviceRegistry::new(Vec::new()),
-            build_adapter: Arc::new(|_| anyhow::bail!("no such adapter kind")),
-        }
+        empty_state(registry_with("osc-x32", |_| anyhow::bail!("no such adapter kind")))
     }
 
     /// Also returns the shared set every `FakeAdapter` built by this state
@@ -418,12 +472,27 @@ mod tests {
     fn test_state_with_disconnect_tracking() -> (PatchState, Arc<StdMutex<HashSet<String>>>) {
         let disconnected = Arc::new(StdMutex::new(HashSet::new()));
         let tracked = disconnected.clone();
-        let state = PatchState {
-            router: Router::new(Vec::new()),
-            devices: DeviceRegistry::new(Vec::new()),
-            build_adapter: Arc::new(move |device| Ok(Box::new(FakeAdapter::new_tracked(&device.id, tracked.clone())) as Box<dyn DeviceAdapter>)),
-        };
+        let state = empty_state(registry_with("osc-x32", move |device| {
+            Ok(Box::new(FakeAdapter::new_tracked(&device.id, tracked.clone())) as Box<dyn LocalAdapter>)
+        }));
         (state, disconnected)
+    }
+
+    /// Directly registers a virtual device the way a config file would,
+    /// bypassing the `add_device` HTTP handler - but still populates
+    /// `descriptors` the same way that handler would, since several
+    /// existing tests rely on being able to resolve mappings against
+    /// devices set up this way.
+    fn insert_virtual(state: &PatchState, id: &str, kind: &str, channels: u16) {
+        state.devices.insert(DeviceConfig {
+            id: id.into(),
+            kind: kind.into(),
+            address: None,
+            port: None,
+            is_virtual: true,
+            channels: Some(channels),
+        });
+        state.descriptors.write().unwrap().insert(id.into(), channel_scheme::descriptors_for_channels(channels));
     }
 
     async fn call(app: &AxumRouter, req: Request<Body>) -> (StatusCode, serde_json::Value) {
@@ -476,7 +545,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn add_real_device_connects_via_build_adapter() {
+    async fn add_real_device_connects_via_registry() {
         let state = test_state();
         let app = app(state.clone());
 
@@ -525,14 +594,7 @@ mod tests {
     #[tokio::test]
     async fn add_device_duplicate_id_is_a_conflict() {
         let state = test_state();
-        state.devices.insert(DeviceConfig {
-            id: "dup".into(),
-            kind: DeviceKind::OscWing,
-            address: None,
-            port: None,
-            is_virtual: true,
-            channels: Some(8),
-        });
+        insert_virtual(&state, "dup", "osc-wing", 8);
         let app = app(state);
 
         let (status, body) = call(&app, post("/api/devices", r#"{"id":"dup","kind":"osc-wing","virtual":true,"channels":8}"#)).await;
@@ -543,47 +605,32 @@ mod tests {
     #[tokio::test]
     async fn remove_virtual_device_cascades_its_mappings() {
         let state = test_state();
-        state.devices.insert(DeviceConfig {
-            id: "future-x32".into(),
-            kind: DeviceKind::OscX32,
-            address: None,
-            port: None,
-            is_virtual: true,
-            channels: Some(8),
-        });
-        state.devices.insert(DeviceConfig {
-            id: "console".into(),
-            kind: DeviceKind::OscX32,
-            address: Some("10.0.0.1".parse().unwrap()),
-            port: None,
-            is_virtual: false,
-            channels: None,
-        });
-        state.router.add_mapping(Mapping {
-            from: PreampAddress::new("future-x32", 1),
-            to: PreampAddress::new("console", 1),
-            bidirectional: true,
-        });
+        insert_virtual(&state, "future-x32", "osc-x32", 8);
+        insert_virtual(&state, "console", "osc-x32", 24);
         let app = app(state.clone());
+
+        let (status, _) = call(
+            &app,
+            post(
+                "/api/mappings",
+                r#"{"from":{"device":"future-x32","channel":1},"to":{"device":"console","channel":1},"bidirectional":true}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
 
         let (status, _) = call(&app, delete_req("/api/devices/future-x32")).await;
         assert_eq!(status, StatusCode::NO_CONTENT);
 
         assert!(!state.devices.contains("future-x32"));
         assert!(state.router.mappings().is_empty(), "removing the device must cascade-remove its mappings");
+        assert!(state.channel_mappings.read().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn remove_real_device_disconnects_and_cascades_its_mappings() {
         let (state, disconnected) = test_state_with_disconnect_tracking();
-        state.devices.insert(DeviceConfig {
-            id: "future-x32".into(),
-            kind: DeviceKind::OscX32,
-            address: None,
-            port: None,
-            is_virtual: true,
-            channels: Some(8),
-        });
+        insert_virtual(&state, "future-x32", "osc-x32", 8);
         let app = app(state.clone());
 
         let (status, _) = call(
@@ -593,11 +640,15 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
 
-        state.router.add_mapping(Mapping {
-            from: PreampAddress::new("future-x32", 1),
-            to: PreampAddress::new("console", 1),
-            bidirectional: true,
-        });
+        let (status, _) = call(
+            &app,
+            post(
+                "/api/mappings",
+                r#"{"from":{"device":"future-x32","channel":1},"to":{"device":"console","channel":1},"bidirectional":true}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
 
         let (status, _) = call(&app, delete_req("/api/devices/console")).await;
         assert_eq!(status, StatusCode::NO_CONTENT);
@@ -618,14 +669,7 @@ mod tests {
     #[tokio::test]
     async fn add_mapping_rejects_unknown_device() {
         let state = test_state();
-        state.devices.insert(DeviceConfig {
-            id: "a".into(),
-            kind: DeviceKind::OscWing,
-            address: None,
-            port: None,
-            is_virtual: true,
-            channels: Some(8),
-        });
+        insert_virtual(&state, "a", "osc-wing", 8);
         let app = app(state);
 
         let (status, body) = call(
@@ -641,24 +685,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn add_mapping_rejects_a_channel_out_of_range() {
+        let state = test_state();
+        insert_virtual(&state, "a", "osc-wing", 8);
+        insert_virtual(&state, "b", "osc-wing", 8);
+        let app = app(state);
+
+        let (status, body) = call(
+            &app,
+            post(
+                "/api/mappings",
+                r#"{"from":{"device":"a","channel":1},"to":{"device":"b","channel":99}}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"].as_str().unwrap().contains("no shared objects"));
+    }
+
+    #[tokio::test]
     async fn add_duplicate_mapping_is_a_conflict() {
         let state = test_state();
-        for id in ["a", "b"] {
-            state.devices.insert(DeviceConfig {
-                id: id.into(),
-                kind: DeviceKind::OscWing,
-                address: None,
-                port: None,
-                is_virtual: true,
-                channels: Some(8),
-            });
-        }
-        state.router.add_mapping(Mapping {
-            from: PreampAddress::new("a", 1),
-            to: PreampAddress::new("b", 1),
-            bidirectional: true,
-        });
+        insert_virtual(&state, "a", "osc-wing", 8);
+        insert_virtual(&state, "b", "osc-wing", 8);
         let app = app(state);
+
+        let (status, _) = call(
+            &app,
+            post("/api/mappings", r#"{"from":{"device":"a","channel":1},"to":{"device":"b","channel":1}}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
 
         let (status, _) = call(
             &app,
@@ -671,16 +728,8 @@ mod tests {
     #[tokio::test]
     async fn add_then_remove_mapping_round_trips() {
         let state = test_state();
-        for id in ["a", "b"] {
-            state.devices.insert(DeviceConfig {
-                id: id.into(),
-                kind: DeviceKind::OscWing,
-                address: None,
-                port: None,
-                is_virtual: true,
-                channels: Some(8),
-            });
-        }
+        insert_virtual(&state, "a", "osc-wing", 8);
+        insert_virtual(&state, "b", "osc-wing", 8);
         let app = app(state.clone());
 
         let (status, _) = call(
@@ -689,10 +738,13 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NO_CONTENT);
-        assert_eq!(state.router.mappings().len(), 1);
+        assert_eq!(state.channel_mappings.read().unwrap().len(), 1);
+        // Gain + phantom, per the shared per-channel scheme.
+        assert_eq!(state.router.mappings().len(), 2);
 
         let (status, _) = call(&app, delete_req("/api/mappings/a:1-%3Eb:2")).await;
         assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(state.channel_mappings.read().unwrap().is_empty());
         assert!(state.router.mappings().is_empty());
     }
 
@@ -706,20 +758,15 @@ mod tests {
     #[tokio::test]
     async fn state_reflects_devices_and_mappings() {
         let state = test_state();
-        state.devices.insert(DeviceConfig {
-            id: "a".into(),
-            kind: DeviceKind::OscWing,
-            address: None,
-            port: None,
-            is_virtual: true,
-            channels: Some(8),
-        });
-        state.router.add_mapping(Mapping {
-            from: PreampAddress::new("a", 1),
-            to: PreampAddress::new("a", 2),
-            bidirectional: false,
-        });
-        let app = app(state);
+        insert_virtual(&state, "a", "osc-wing", 8);
+        let app = app(state.clone());
+
+        let (status, _) = call(
+            &app,
+            post("/api/mappings", r#"{"from":{"device":"a","channel":1},"to":{"device":"a","channel":2}}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
 
         let (status, body) = call(&app, get_req("/api/state")).await;
         assert_eq!(status, StatusCode::OK);

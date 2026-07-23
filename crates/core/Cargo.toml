@@ -10,3 +10,7 @@ async-trait.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+anyhow.workspace = true
+dante-babelbox-oca.workspace = true
+dante-babelbox-oca-plugin-abi.workspace = true
+abi_stable.workspace = true
