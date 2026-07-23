@@ -27,3 +27,12 @@ notify = "6"
 
 [dev-dependencies]
 rosc = "0.10"
+# Not used directly from Rust code - listed so `cargo test` builds their
+# cdylib artifacts (as a side effect of building their rlib targets),
+# which the tests in daemon.rs load back via a real --plugins-dir. See
+# `plugins_dir_for_tests()` there.
+dante-babelbox-plugin-osc-x32 = { path = "../plugin-osc-x32" }
+dante-babelbox-plugin-osc-wing = { path = "../plugin-osc-wing" }
+dante-babelbox-plugin-ah-tcp = { path = "../plugin-ah-tcp" }
+dante-babelbox-plugin-dlive-tcp = { path = "../plugin-dlive-tcp" }
+dante-babelbox-plugin-yamaha-dm3 = { path = "../plugin-yamaha-dm3" }

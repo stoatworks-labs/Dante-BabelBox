@@ -457,6 +457,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante-babelbox-plugin-ah-tcp"
+version = "0.1.0"
+dependencies = [
+ "abi_stable",
+ "dante-babelbox-core",
+ "dante-babelbox-oca-plugin-abi",
+ "dante-babelbox-preamp-adapter-ah",
+ "tokio",
+]
+
+[[package]]
+name = "dante-babelbox-plugin-dlive-tcp"
+version = "0.1.0"
+dependencies = [
+ "abi_stable",
+ "dante-babelbox-core",
+ "dante-babelbox-oca-plugin-abi",
+ "dante-babelbox-preamp-adapter-ah",
+ "tokio",
+]
+
+[[package]]
+name = "dante-babelbox-plugin-osc-wing"
+version = "0.1.0"
+dependencies = [
+ "abi_stable",
+ "dante-babelbox-core",
+ "dante-babelbox-oca-plugin-abi",
+ "dante-babelbox-preamp-adapter-osc",
+ "rosc",
+ "tokio",
+]
+
+[[package]]
 name = "dante-babelbox-plugin-osc-x32"
 version = "0.1.0"
 dependencies = [
@@ -465,6 +499,18 @@ dependencies = [
  "dante-babelbox-oca",
  "dante-babelbox-oca-plugin-abi",
  "dante-babelbox-preamp-adapter-osc",
+ "rosc",
+ "tokio",
+]
+
+[[package]]
+name = "dante-babelbox-plugin-yamaha-dm3"
+version = "0.1.0"
+dependencies = [
+ "abi_stable",
+ "dante-babelbox-core",
+ "dante-babelbox-oca-plugin-abi",
+ "dante-babelbox-preamp-adapter-yamaha",
  "rosc",
  "tokio",
 ]
@@ -513,6 +559,11 @@ dependencies = [
  "dante-babelbox-core",
  "dante-babelbox-discovery",
  "dante-babelbox-oca",
+ "dante-babelbox-plugin-ah-tcp",
+ "dante-babelbox-plugin-dlive-tcp",
+ "dante-babelbox-plugin-osc-wing",
+ "dante-babelbox-plugin-osc-x32",
+ "dante-babelbox-plugin-yamaha-dm3",
  "dante-babelbox-preamp-adapter-ah",
  "dante-babelbox-preamp-adapter-osc",
  "dante-babelbox-preamp-adapter-yamaha",

@@ -1,0 +1,18 @@
+[package]
+name = "dante-babelbox-plugin-dlive-tcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "dante_babelbox_plugin_dlive_tcp"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dante-babelbox-core.workspace = true
+dante-babelbox-oca-plugin-abi.workspace = true
+dante-babelbox-preamp-adapter-ah.workspace = true
+abi_stable.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

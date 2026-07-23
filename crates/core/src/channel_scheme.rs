@@ -1,12 +1,12 @@
 //! The shared "three objects per channel" (gain, phantom, pad) `Ono`
 //! scheme used by any device whose control surface is just those three
-//! per channel: the legacy (not-yet-plugin) preamp adapters via
-//! [`crate::LegacyPreampShim`], and virtual devices - which have no real
-//! adapter to ask, but still need a plausible descriptor set so they can
-//! be mapped against real devices in the patch-bay UI ahead of the
-//! still-unbuilt device-emulation layer. Centralized here (rather than
-//! duplicated in the shim and the virtual-device path) so both stay in
-//! sync automatically.
+//! per channel: every preamp vendor wrapped in
+//! [`crate::LegacyPluginBridge`] (Wing, AHM, dLive, DM3), and virtual
+//! devices - which have no real adapter to ask, but still need a
+//! plausible descriptor set so they can be mapped against real devices in
+//! the patch-bay UI ahead of the still-unbuilt device-emulation layer.
+//! Centralized here (rather than duplicated per plugin) so all of them
+//! stay in sync automatically.
 
 use dante_babelbox_oca::{Ono, OcaClass, OcaObjectDescriptor};
 

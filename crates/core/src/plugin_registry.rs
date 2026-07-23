@@ -23,7 +23,6 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use abi_stable::library::RootModule;
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use dante_babelbox_oca::{Ono, OcaAddress, OcaEvent, OcaObjectDescriptor, OcaValue};
@@ -83,7 +82,19 @@ impl PluginRegistry {
             if !is_dylib_candidate(&path) {
                 continue;
             }
-            match PluginRootModule_Ref::load_from_file(&path) {
+            // Deliberately *not* `PluginRootModule_Ref::load_from_file`:
+            // `RootModule::load_from` caches the loaded module in a static
+            // keyed by the *type* `PluginRootModule_Ref`, not by path - so
+            // once any one plugin file has been loaded, every later
+            // `load_from_file` call for a *different* file (since every
+            // plugin shares this same root-module type) would silently
+            // return the first one's already-cached module again. Going
+            // through `lib_header_from_path` + `LibHeader::init_root_module`
+            // instead loads and checks each file independently, with no
+            // shared per-type cache.
+            let loaded_root = abi_stable::library::lib_header_from_path(&path)
+                .and_then(|header| header.init_root_module::<PluginRootModule_Ref>());
+            match loaded_root {
                 Ok(root) => {
                     let plugin_info = root.plugin_info()();
                     let kinds: Vec<String> =

@@ -39,31 +39,35 @@ true device emulation would take.
 crates/
 ├── oca/                      # internal object model (Ono/OcaClass/OcaValue/OcaObject/OcaEvent)
 ├── oca-plugin-abi/            # abi_stable FFI contract for dynamically-loaded device plugins
-├── core/                      # PluginRegistry, LocalAdapter, LegacyPreampShim, Router, DeviceAdapter (legacy)
+├── core/                      # PluginRegistry, LocalAdapter, LegacyPluginBridge, Router
 ├── discovery/                 # mDNS-based Dante device discovery + Dante's own routing-observation protocol
-├── plugin-osc-x32/             # X32-family, built as a real loadable plugin (the reference implementation)
-├── preamp-adapter-osc/         # Wing (Behringer/Midas OSC dialect) - not yet migrated to a plugin
-├── preamp-adapter-ah/          # AHM TCP/IP + dLive MIDI-over-TCP (Allen & Heath) - not yet migrated
-├── preamp-adapter-yamaha/      # DM3 OSC - not yet migrated
+├── plugin-osc-x32/             # X32-family plugin (hand-written FFI translation)
+├── plugin-osc-wing/             # Wing plugin (built on LegacyPluginBridge)
+├── plugin-ah-tcp/                # AHM plugin (built on LegacyPluginBridge)
+├── plugin-dlive-tcp/             # dLive plugin (built on LegacyPluginBridge)
+├── plugin-yamaha-dm3/            # DM3 plugin (built on LegacyPluginBridge)
+├── preamp-adapter-osc/         # X32/Wing OSC wire-protocol logic, reused by the two plugins above
+├── preamp-adapter-ah/          # AHM/dLive wire-protocol logic, reused by the two plugins above
+├── preamp-adapter-yamaha/      # DM3 wire-protocol logic, reused by the plugin above
 ├── preamp-web/                 # Patch-bay web UI + device/mapping management API (axum)
 └── preamp-cli/                 # `preamp-bridge` binary: discover, init, run, config, hot-reload
 ```
 
-1. **Device support** — one implementation per vendor protocol, loaded
-   one of two ways. X32 is built as a real dynamically-loadable plugin
-   (a separate `.so`/`.dylib`/`.dll`, loaded at runtime via
-   `--plugins-dir` - see [`docs/plugin-development-guide.md`](docs/plugin-development-guide.md)
-   for the contract). Wing, AHM, dLive, and DM3 still implement the
-   older in-process `DeviceAdapter` trait (`connect`, `disconnect`,
-   `set_gain`, `set_phantom`, `get_state`, `subscribe`), compiled
-   directly into the binary and wrapped in a shared `LegacyPreampShim` so
-   the `Router` sees one uniform interface either way. Either path's job
-   is purely protocol translation: turning generic gain/phantom values
-   into that vendor's specific bytes, and back, exposed internally as
-   OCA objects (`Ono`/`OcaClass`/`OcaValue` - `crates/oca`). Removing a
-   live device (via the web UI) calls its `disconnect()`, which actually
-   frees its port rather than just dropping it from a list, regardless
-   of which path it came from.
+1. **Device support** — one implementation per vendor protocol, every one
+   of which ships as a real dynamically-loadable plugin (a separate
+   `.so`/`.dylib`/`.dll`, loaded at runtime via `--plugins-dir` - see
+   [`docs/plugin-development-guide.md`](docs/plugin-development-guide.md)
+   for the contract). X32's FFI translation is hand-written; Wing, AHM,
+   dLive, and DM3 are thin crates built on `core::LegacyPluginBridge`,
+   which generically wraps the older in-process `DeviceAdapter` trait
+   (`connect`, `disconnect`, `set_gain`, `set_phantom`, `get_state`,
+   `subscribe`) so their existing wire-protocol code didn't need
+   rewriting. Either way the job is purely protocol translation: turning
+   generic gain/phantom values into that vendor's specific bytes, and
+   back, exposed internally as OCA objects (`Ono`/`OcaClass`/`OcaValue` -
+   `crates/oca`). Removing a live device (via the web UI) calls its
+   `disconnect()`, which actually frees its port rather than just
+   dropping it from a list.
 2. **Router** — holds your mapping table (from `bridge.toml`, or added
    live via the web UI) and, when a device reports a state change on one
    of its objects, pushes that change out to every object mapped to it.

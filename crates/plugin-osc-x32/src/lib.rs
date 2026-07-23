@@ -5,19 +5,23 @@
 //! Reuses [`dante_babelbox_preamp_adapter_osc::X32Adapter`] verbatim for
 //! the actual wire protocol (headamp OSC paths, `/info` parsing, the
 //! `/xremote` heartbeat, disconnect/cancellation) - this crate is purely
-//! an FFI-facing translation layer, structurally identical to
-//! `dante_babelbox_core::LegacyPreampShim` but crossing a dylib boundary
-//! instead of staying in-process. Wire-format changes (new OSC paths,
-//! corrected offsets, etc.) belong in that crate, never duplicated here.
+//! an FFI-facing translation layer, structurally identical in spirit to
+//! `dante_babelbox_core::LegacyPluginBridge` (the generic version of this
+//! same pattern used by the other four preamp vendors) but hand-written
+//! here rather than going through that generic wrapper, since X32 was
+//! this project's first plugin and predates it. Wire-format changes (new
+//! OSC paths, corrected offsets, etc.) belong in
+//! `dante_babelbox_preamp_adapter_osc`, never duplicated here.
 //!
 //! The FFI [`PluginAdapter`] trait is synchronous (async doesn't cross an
 //! `abi_stable` boundary cleanly - see `oca-plugin-abi`'s doc comment),
 //! but `X32Adapter` is async: each adapter instance owns its own
-//! single-threaded Tokio runtime to bridge the two.
-//! `connect`/`disconnect`/`get_object`/`set_object` block on that runtime;
-//! the adapter's own receive loop and `/xremote` heartbeat keep running
-//! as background tasks on it between calls, exactly as they do today when
-//! `X32Adapter` runs in-process.
+//! multi-threaded Tokio runtime to bridge the two (see the `X32PluginAdapter::new`
+//! doc comment below for why it must be multi-threaded, not
+//! `new_current_thread`). `connect`/`disconnect`/`get_object`/`set_object`
+//! block on that runtime; the adapter's own receive loop and `/xremote`
+//! heartbeat keep running as background tasks on it between calls,
+//! exactly as they do today when `X32Adapter` runs in-process.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex as StdMutex};

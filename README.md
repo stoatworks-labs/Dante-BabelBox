@@ -80,12 +80,16 @@ inline bridge:
 crates/
 ├── oca/                      # internal object model (Ono/OcaClass/OcaValue/OcaObject/OcaEvent) - see "Plugin Architecture" below
 ├── oca-plugin-abi/            # abi_stable FFI contract for dynamically-loaded device plugins
-├── core/                      # PluginRegistry, LocalAdapter, LegacyPreampShim, Router, DeviceAdapter (legacy)
+├── core/                      # PluginRegistry, LocalAdapter, LegacyPluginBridge, Router
 ├── discovery/                 # mDNS-based Dante device discovery + Dante's own routing-observation protocol
-├── plugin-osc-x32/             # X32-family, built as a real loadable plugin (the reference implementation)
-├── preamp-adapter-osc/         # Wing (Behringer/Midas OSC dialect) - not yet migrated to a plugin
-├── preamp-adapter-ah/          # AHM TCP/IP + dLive MIDI-over-TCP (Allen & Heath) - not yet migrated
-├── preamp-adapter-yamaha/      # DM3 OSC - not yet migrated
+├── plugin-osc-x32/             # X32-family plugin (hand-written FFI translation - the original reference implementation)
+├── plugin-osc-wing/             # Wing plugin (thin wrapper over LegacyPluginBridge)
+├── plugin-ah-tcp/                # AHM plugin (thin wrapper over LegacyPluginBridge)
+├── plugin-dlive-tcp/             # dLive plugin (thin wrapper over LegacyPluginBridge)
+├── plugin-yamaha-dm3/            # DM3 plugin (thin wrapper over LegacyPluginBridge)
+├── preamp-adapter-osc/         # X32/Wing OSC wire-protocol logic, reused by the two plugins above
+├── preamp-adapter-ah/          # AHM/dLive wire-protocol logic, reused by the two plugins above
+├── preamp-adapter-yamaha/      # DM3 wire-protocol logic, reused by the plugin above
 ├── preamp-web/                 # Patch-bay web UI + device/mapping management API (axum)
 └── preamp-cli/                 # `preamp-bridge` binary: discover, init, run, config, hot-reload
 ```
@@ -102,12 +106,14 @@ full picture, and
 [`docs/plugin-development-guide.md`](docs/plugin-development-guide.md)
 for how to add a new device as a loadable plugin.
 
-X32 is the reference example of a device built as a real dynamically-loaded
-plugin; Wing, AHM, dLive, and DM3 still run through the older in-process
-`core::DeviceAdapter` trait (connect, set_gain, set_phantom, get_state,
-subscribe), wrapped in a shared `LegacyPreampShim` so the `Router` sees
-one uniform interface either way. Migrating the rest to real plugins is
-tracked in the roadmap below.
+All five preamp vendors ship as real dynamically-loaded plugins - X32's
+FFI translation is hand-written (it was this project's original
+proof-of-concept, predating the generic wrapper below); Wing, AHM,
+dLive, and DM3 are thin crates built on `core::LegacyPluginBridge`, which
+generically wraps the older in-process `DeviceAdapter` trait (connect,
+set_gain, set_phantom, get_state, subscribe) so their existing,
+already-tested wire-protocol code didn't need rewriting to become a real
+plugin - only a `create_adapter`/`plugin_info` pair per vendor.
 
 ## Plugin Architecture
 
@@ -115,35 +121,46 @@ Device support can be loaded two ways, and both end up looking identical
 to the `Router` and the web UI:
 
 - **Statically registered** — compiled into the `preamp-bridge` binary at
-  build time (today: Wing, AHM, dLive, DM3, each wrapped in
-  `LegacyPreampShim`).
+  build time (today: only the two known-but-unimplemented placeholder
+  kinds, `ah-midi`/`yamaha`, which exist purely to explain why they're
+  not supported rather than to back a real device).
 - **Dynamically loaded** — a separate `.so`/`.dylib`/`.dll` file, scanned
   from a directory (`--plugins-dir`, default `plugins`) at startup and
   loaded at runtime via [`abi_stable`](https://docs.rs/abi_stable). Adding
   a new vendor this way needs **no recompile of this project at all** —
   build your plugin, drop the file in the plugins directory, restart the
-  bridge.
+  bridge. All five real preamp vendors work this way today.
 
 ```mermaid
 flowchart LR
     subgraph Host["preamp-bridge (compiled)"]
-        Reg["PluginRegistry"] --> Router
-        Legacy["LegacyPreampShim\n(Wing / AHM / dLive / DM3)"] --> Reg
+        Reg["PluginRegistry"]
+        Reg --> Router
     end
-    Dylib["libplugin_osc_x32.dylib\n(dynamically loaded)"] -. abi_stable FFI .-> Reg
+    X32["libplugin_osc_x32"] -. abi_stable FFI .-> Reg
+    Wing["libplugin_osc_wing"] -. abi_stable FFI .-> Reg
+    Ahm["libplugin_ah_tcp"] -. abi_stable FFI .-> Reg
+    Dlive["libplugin_dlive_tcp"] -. abi_stable FFI .-> Reg
+    Dm3["libplugin_yamaha_dm3"] -. abi_stable FFI .-> Reg
     Router["Router (OCA objects)"] --> Web["Patch-bay web UI"]
 ```
 
-Both paths converge on the same internal shapes: `LocalAdapter` (the
-in-process trait the `Router` actually talks to) and the OCA object model
-(`Ono`/`OcaClass`/`OcaValue`/`OcaObject`) described above. A dynamically-loaded
-plugin talks to the host through a narrower, FFI-safe mirror of that same
-model (`dante-babelbox-oca-plugin-abi`'s `PluginAdapter` trait) — see
+Both registration paths converge on the same internal shapes:
+`LocalAdapter` (the in-process trait the `Router` actually talks to) and
+the OCA object model (`Ono`/`OcaClass`/`OcaValue`/`OcaObject`) described
+above. A dynamically-loaded plugin talks to the host through a narrower,
+FFI-safe mirror of that same model (`dante-babelbox-oca-plugin-abi`'s
+`PluginAdapter` trait) — see
 [`docs/plugin-development-guide.md`](docs/plugin-development-guide.md) for
-the full contract, worked example (`crates/plugin-osc-x32`), and the
-real pitfalls hit building it (async-to-sync bridging, why the plugin's
-Tokio runtime has to be multi-threaded, how automatic device+channel
-mapping resolution actually matches objects by role name).
+the full contract, worked examples (`crates/plugin-osc-x32` for a
+hand-written translation, `crates/plugin-osc-wing` for the generic
+`LegacyPluginBridge` path every other vendor uses), and the real
+pitfalls hit building it (async-to-sync bridging, why a plugin's Tokio
+runtime has to be multi-threaded, why loading more than one plugin file
+sharing the same root-module type needs `abi_stable`'s uncached
+per-file API rather than `RootModule::load_from_file`, how automatic
+device+channel mapping resolution actually matches objects by role
+name).
 
 That guide is written for anyone adding support for a new device without
 needing this project to accept a PR first — implement your protocol,
@@ -407,9 +424,8 @@ a CA (`signtool sign`) on Windows.
 ## Roadmap / TODO
 
 - [ ] **Validate against real hardware** — every adapter is currently tested only against mock devices; nothing has been run on live gear.
-- [ ] **Migrate Wing, AHM, dLive, DM3 to real plugins** — retire `LegacyPreampShim` once all five preamp adapters run through the dylib path X32 already proves out.
 - [ ] **Migrate the radio-mic domain onto plugins + OCA** — give it a `Router` in the process (it has none today, since it's pure monitoring), so telemetry mapping/web-UI parity comes for free.
-- [ ] **Ship plugin binaries in release CI** — `.github/workflows/release.yml` builds only the two host binaries today; building/packaging `crates/plugin-osc-x32`'s `cdylib` per platform is a real CI expansion, not yet done.
+- [ ] **Ship plugin binaries in release CI** — `.github/workflows/release.yml` builds only the two host binaries today; building/packaging all five `crates/plugin-*` `cdylib`s per platform is a real CI expansion, not yet done.
 - [ ] **Preamp device emulation** — make the bridge answer as a native device of a foreign brand so a console's own preamp UI controls it directly (needs packet captures of a real console+device pairing).
 - [ ] **Telemetry emulation on a host console** — e.g. surface ULX-D-shaped data on a Yamaha QL Wireless Monitor screen (same capture-dependent problem).
 - [ ] **More preamp vendors** — Allen & Heath Qu/SQ, Yamaha CL/QL/DM7, Yamaha Rio/Tio; all blocked on missing public control specs or wire-format captures. The plugin path (see below) means these no longer need to land in this repo to exist.
@@ -428,8 +444,11 @@ packet captures from real hardware, not assumptions.
 
 - **In-process** (lands in this repo) — implement the relevant trait
   (`DeviceAdapter` for preamp control, `MicAdapter` for radio-mic
-  telemetry) directly, compiled into the workspace. This is how every
-  adapter here except X32 works today.
+  telemetry) directly, compiled into the workspace. This is how the
+  radio-mic adapters (Shure, Sennheiser) work today - the preamp domain
+  has fully moved to the plugin path below, though a not-yet-bespoke
+  vendor can still start here and move to `LegacyPluginBridge` later
+  (see `crates/plugin-osc-wing` for what that migration looks like).
 - **Plugin** (doesn't need to touch this repo at all) — implement
   `dante-babelbox-oca-plugin-abi`'s `PluginAdapter` trait, compile as a
   `cdylib`, and it loads into any `preamp-bridge` build via

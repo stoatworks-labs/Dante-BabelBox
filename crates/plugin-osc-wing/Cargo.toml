@@ -1,0 +1,19 @@
+[package]
+name = "dante-babelbox-plugin-osc-wing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "dante_babelbox_plugin_osc_wing"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dante-babelbox-core.workspace = true
+dante-babelbox-oca-plugin-abi.workspace = true
+dante-babelbox-preamp-adapter-osc.workspace = true
+abi_stable.workspace = true
+
+[dev-dependencies]
+rosc = "0.10"
+tokio.workspace = true

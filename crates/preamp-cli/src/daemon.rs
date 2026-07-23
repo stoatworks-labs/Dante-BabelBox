@@ -4,44 +4,25 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
-use dante_babelbox_core::{channel_mapping, channel_scheme, DeviceConfig, LegacyPreampShim, LocalAdapter, PluginRegistry, Router};
+use dante_babelbox_core::{channel_mapping, channel_scheme, PluginRegistry, Router};
 use dante_babelbox_oca::OcaObjectDescriptor;
-use dante_babelbox_preamp_adapter_ah::{AhmAdapter, DliveAdapter};
-use dante_babelbox_preamp_adapter_osc::WingAdapter;
-use dante_babelbox_preamp_adapter_yamaha::Dm3Adapter;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::config::Config;
-use crate::ports::{DEFAULT_AHM_PORT, DEFAULT_DLIVE_PORT, DEFAULT_DM3_PORT, DEFAULT_WING_PORT};
 
-/// Registers every not-yet-migrated preamp vendor as a static plugin kind
-/// (wrapped in [`LegacyPreampShim`]), plus the two known-but-unimplemented
-/// kinds (`ah-midi`/`yamaha`) with the same clear explanatory error they
-/// always had - so looking one of those up still surfaces specific
-/// guidance rather than a generic "no plugin registered" message. `osc-x32`
-/// is deliberately *not* registered here: it's the proof-of-concept
-/// `cdylib` plugin, loaded from `plugins_dir` instead.
+/// Registers the two known-but-unimplemented kinds (`ah-midi`/`yamaha`)
+/// with a clear explanatory error - so looking one of those up still
+/// surfaces specific guidance rather than a generic "no plugin
+/// registered" message. Every real device kind (`osc-x32`, `osc-wing`,
+/// `ah-tcp`, `dlive-tcp`, `yamaha-dm3`) comes exclusively from a loaded
+/// `cdylib` plugin now - `LegacyPreampShim`, the in-process fallback that
+/// used to back the last four of those, has been retired now that all
+/// five preamp adapters run through the same dylib path `osc-x32` proved
+/// out first (see `crates/plugin-osc-*`).
 pub fn build_registry(plugins_dir: &Path) -> Arc<PluginRegistry> {
     let registry = Arc::new(PluginRegistry::new());
 
-    fn legacy_ctor<A: dante_babelbox_core::DeviceAdapter + 'static>(
-        device: &DeviceConfig,
-        default_port: u16,
-        new: impl FnOnce(String, SocketAddr) -> A,
-    ) -> Result<Box<dyn LocalAdapter>> {
-        let ip = device.address.with_context(|| format!("device '{}' has no address", device.id))?;
-        let addr = SocketAddr::new(ip, device.port.unwrap_or(default_port));
-        let channels = device
-            .channel_count()
-            .with_context(|| format!("device '{}': no channel count - specify 'channels' explicitly", device.id))?;
-        Ok(Box::new(LegacyPreampShim::new(Box::new(new(device.id.clone(), addr)), channels)))
-    }
-
-    registry.register_static("osc-wing", |d| legacy_ctor(d, DEFAULT_WING_PORT, WingAdapter::new));
-    registry.register_static("ah-tcp", |d| legacy_ctor(d, DEFAULT_AHM_PORT, AhmAdapter::new));
-    registry.register_static("dlive-tcp", |d| legacy_ctor(d, DEFAULT_DLIVE_PORT, DliveAdapter::new));
-    registry.register_static("yamaha-dm3", |d| legacy_ctor(d, DEFAULT_DM3_PORT, Dm3Adapter::new));
     registry.register_static("ah-midi", |device| {
         bail!(
             "device '{}': Qu/SQ preamp control is not implemented - A&H's public SQ/Qu MIDI protocol \
@@ -210,12 +191,24 @@ mod tests {
     use tokio::io::AsyncWriteExt;
     use tokio::net::{TcpListener, UdpSocket};
 
-    /// End-to-end: a real AhmAdapter and a real Dm3Adapter (both wrapped
-    /// in `LegacyPreampShim`), wired through the Router by `daemon::run()`,
-    /// against mock TCP/UDP peers standing in for real hardware. Proves
-    /// the full path from config -> plugin registry -> shim -> connect ->
-    /// Router propagation works, not just the mocked `LocalAdapter` used
-    /// in the core Router unit tests.
+    /// Where `cargo test` puts this workspace's build artifacts, including
+    /// every plugin crate's `cdylib` - built as a side effect of building
+    /// their `rlib` targets, which `[dev-dependencies]` below pulls in for
+    /// this crate's own test run regardless of whether their Rust API is
+    /// ever referenced from here (see `docs/plugin-development-guide.md`'s
+    /// "Testing" section for the same pattern applied inside each plugin
+    /// crate's own test suite).
+    fn plugins_dir_for_tests() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug")
+    }
+
+    /// End-to-end: a real, dylib-loaded `DliveAdapter` and `Dm3Adapter`
+    /// (via `crates/plugin-dlive-tcp`/`crates/plugin-yamaha-dm3`), wired
+    /// through the Router by `daemon::run()`, against mock TCP/UDP peers
+    /// standing in for real hardware. Proves the full path from config ->
+    /// dylib-loaded plugin registry -> connect -> Router propagation
+    /// works, not just the mocked `LocalAdapter` used in the core Router
+    /// unit tests, or a single plugin's own isolated test.
     #[tokio::test]
     async fn bridges_phantom_change_from_dlive_to_dm3() {
         let dlive_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -250,7 +243,7 @@ mod tests {
             }],
         };
 
-        let bridge = tokio::spawn(run(cfg, None, None, PathBuf::from("/nonexistent-plugins-dir")));
+        let bridge = tokio::spawn(run(cfg, None, None, plugins_dir_for_tests()));
 
         let (mut dlive_socket, _) = tokio::time::timeout(Duration::from_secs(2), dlive_listener.accept())
             .await
@@ -263,8 +256,8 @@ mod tests {
         msg.extend_from_slice(&[0x00, 0x0B, 0x0B, 0x7F, 0xF7]); // opcode 0x0B = 48V status
         dlive_socket.write_all(&msg).await.unwrap();
 
-        // The shim propagates gain and phantom as separate OCA events, so
-        // the Router sends both a set-gain and a set-48VOn message to
+        // The plugin propagates gain and phantom as separate OCA events,
+        // so the Router sends both a set-gain and a set-48VOn message to
         // DM3 (in some order); we only care about the phantom one here.
         let mut buf = [0u8; 512];
         let mut found = false;
@@ -288,16 +281,27 @@ mod tests {
         bridge.abort();
     }
 
-    /// `build_registry` covers exactly the kinds it always did (five real
-    /// vendors plus the two explained-but-unimplemented ones), and the
-    /// `osc-x32` proof-of-concept plugin is never statically registered -
-    /// it only exists if a dylib for it was actually loaded.
+    /// `build_registry` statically registers exactly the two
+    /// explained-but-unimplemented kinds now - every real device kind
+    /// comes exclusively from a loaded dylib (see the module doc comment).
     #[test]
     fn build_registry_covers_the_expected_static_kinds() {
         let registry = build_registry(Path::new("/nonexistent-plugins-dir"));
         let mut kinds = registry.known_kinds();
         kinds.sort();
-        assert_eq!(kinds, vec!["ah-midi", "ah-tcp", "dlive-tcp", "osc-wing", "yamaha", "yamaha-dm3"]);
+        assert_eq!(kinds, vec!["ah-midi", "yamaha"]);
+    }
+
+    /// With a real plugins directory, `build_registry` picks up every
+    /// migrated kind's dylib alongside the two static ones - proof the
+    /// loader genuinely finds and registers all five real vendor kinds,
+    /// not just the pair still statically wired.
+    #[test]
+    fn build_registry_loads_every_migrated_kind_from_a_real_plugins_dir() {
+        let registry = build_registry(&plugins_dir_for_tests());
+        let mut kinds = registry.known_kinds();
+        kinds.sort();
+        assert_eq!(kinds, vec!["ah-midi", "ah-tcp", "dlive-tcp", "osc-wing", "osc-x32", "yamaha", "yamaha-dm3"]);
     }
 
     #[test]

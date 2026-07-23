@@ -38,8 +38,9 @@ enum Command {
         #[arg(long)]
         no_web: bool,
         /// Directory to scan for dynamically-loadable device plugin
-        /// `.so`/`.dylib`/`.dll` files, alongside the built-in
-        /// (not-yet-migrated) vendor adapters.
+        /// `.so`/`.dylib`/`.dll` files. Every real vendor adapter ships
+        /// this way; only a couple of explanatory-error placeholder
+        /// kinds are built in.
         #[arg(long, default_value = "plugins")]
         plugins_dir: PathBuf,
     },

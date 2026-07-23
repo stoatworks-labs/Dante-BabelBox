@@ -1,12 +1,11 @@
 //! An in-process device-adapter trait, generic over the OCA object model
 //! rather than the old preamp-specific `gain_db`/`phantom` surface. This
 //! is what the [`crate::Router`] and the web management API actually talk
-//! to - every device instance presents this same shape regardless of
-//! whether it's backed by a dynamically-loaded plugin
-//! (`plugin_registry::DylibAdapter`) or a not-yet-migrated, statically
-//! linked adapter (a small per-vendor shim wrapping the existing
-//! `DeviceAdapter` impl - see each `preamp-adapter-*` crate's `LocalAdapter`
-//! impl once added). `LocalAdapter` mirrors
+//! to. Every real vendor kind is backed by a dynamically-loaded plugin,
+//! wrapped as a `LocalAdapter` by `plugin_registry::DylibAdapter`; the
+//! only other implementors are the couple of statically linked
+//! explanatory-error placeholder kinds (`ah-midi`, `yamaha`) registered
+//! directly in `daemon.rs::build_registry`. `LocalAdapter` mirrors
 //! `dante_babelbox_oca_plugin_abi::PluginAdapter`'s method surface in
 //! plain Rust (owned types/`anyhow::Error` instead of
 //! `RString`/`RResult`/`RVec`), so both kinds of adapter present one shape
