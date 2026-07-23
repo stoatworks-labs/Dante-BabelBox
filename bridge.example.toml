@@ -1,8 +1,9 @@
 # Example bridge configuration. Copy to bridge.toml and edit for your rig.
 #
-# Implemented device kinds today:
+# Built-in device kinds today:
 #   "osc-x32"    Behringer X32/Wing-family sharing the X32 OSC dialect
-#                (covers X32 and Midas M32/HD96)
+#                (covers X32 and Midas M32/HD96) - ships as a loaded
+#                plugin (crates/plugin-osc-x32), not compiled directly in
 #   "osc-wing"   Behringer Wing's own OSC dialect (console's 8 built-in
 #                LCL preamps only for now - see adapter-osc's wing.rs)
 #   "ah-tcp"     Allen & Heath AHM-series Dante/AES67 processors
@@ -12,7 +13,11 @@
 #                Input Num 1-16; gain is coarse integer dB, 0-64 only)
 #
 # "ah-midi" (Qu/SQ) and "yamaha" (CL/QL/DM7, Rio/Tio) are not implemented
-# yet - see the project task list for why.
+# yet - see the project task list for why. `kind` is an open string, not
+# a fixed list - dropping a plugin `.so`/`.dylib`/`.dll` into the
+# bridge's --plugins-dir (see README's "Plugin Architecture" section and
+# docs/plugin-development-guide.md) registers additional kinds without
+# needing this file's format, or this project, to change at all.
 #
 # The [[mapping]] entries below were written by hand. `preamp-bridge init
 # --infer-mappings` can generate a first draft of these by observing live

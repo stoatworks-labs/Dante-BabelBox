@@ -37,28 +37,37 @@ true device emulation would take.
 
 ```
 crates/
-├── core/                    # shared AdapterError/DeviceInfo + preamp Router/types
-├── discovery/                # mDNS-based Dante device discovery + Dante's own routing-observation protocol
-├── preamp-adapter-osc/        # X32-family + Wing (Behringer/Midas OSC dialects)
-├── preamp-adapter-ah/         # AHM TCP/IP + dLive MIDI-over-TCP (Allen & Heath)
-├── preamp-adapter-yamaha/     # DM3 OSC
-├── preamp-web/                # Patch-bay web UI + device/mapping management API (axum)
-└── preamp-cli/                # `preamp-bridge` binary: discover, init, run, config, hot-reload
+├── oca/                      # internal object model (Ono/OcaClass/OcaValue/OcaObject/OcaEvent)
+├── oca-plugin-abi/            # abi_stable FFI contract for dynamically-loaded device plugins
+├── core/                      # PluginRegistry, LocalAdapter, LegacyPreampShim, Router, DeviceAdapter (legacy)
+├── discovery/                 # mDNS-based Dante device discovery + Dante's own routing-observation protocol
+├── plugin-osc-x32/             # X32-family, built as a real loadable plugin (the reference implementation)
+├── preamp-adapter-osc/         # Wing (Behringer/Midas OSC dialect) - not yet migrated to a plugin
+├── preamp-adapter-ah/          # AHM TCP/IP + dLive MIDI-over-TCP (Allen & Heath) - not yet migrated
+├── preamp-adapter-yamaha/      # DM3 OSC - not yet migrated
+├── preamp-web/                 # Patch-bay web UI + device/mapping management API (axum)
+└── preamp-cli/                 # `preamp-bridge` binary: discover, init, run, config, hot-reload
 ```
 
-1. **Adapters** — one per vendor protocol. Each implements a common
-   `DeviceAdapter` trait (`connect`, `disconnect`, `set_gain`,
-   `set_phantom`, `get_state`, and a `subscribe` stream of state-change
-   events observed on the wire). An adapter's job is purely protocol
-   translation: turning generic gain/phantom values into that vendor's
-   specific bytes, and back. `disconnect()` tears down the adapter's
-   background socket task via a cancellation token, so removing a live
-   device (via the web UI) actually frees its port rather than just
-   dropping it from a list.
+1. **Device support** — one implementation per vendor protocol, loaded
+   one of two ways. X32 is built as a real dynamically-loadable plugin
+   (a separate `.so`/`.dylib`/`.dll`, loaded at runtime via
+   `--plugins-dir` - see [`docs/plugin-development-guide.md`](docs/plugin-development-guide.md)
+   for the contract). Wing, AHM, dLive, and DM3 still implement the
+   older in-process `DeviceAdapter` trait (`connect`, `disconnect`,
+   `set_gain`, `set_phantom`, `get_state`, `subscribe`), compiled
+   directly into the binary and wrapped in a shared `LegacyPreampShim` so
+   the `Router` sees one uniform interface either way. Either path's job
+   is purely protocol translation: turning generic gain/phantom values
+   into that vendor's specific bytes, and back, exposed internally as
+   OCA objects (`Ono`/`OcaClass`/`OcaValue` - `crates/oca`). Removing a
+   live device (via the web UI) calls its `disconnect()`, which actually
+   frees its port rather than just dropping it from a list, regardless
+   of which path it came from.
 2. **Router** — holds your mapping table (from `bridge.toml`, or added
-   live via the web UI) and, when an adapter reports a state change on a
-   device, pushes that change out to every device mapped to it. It
-   tracks the last value it pushed to each address so a device's own
+   live via the web UI) and, when a device reports a state change on one
+   of its objects, pushes that change out to every object mapped to it.
+   It tracks the last value it pushed to each address so a device's own
    confirmation of a command the bridge just sent isn't mistaken for a
    fresh independent change and echoed back and forth forever between
    two bidirectionally-mapped devices. Devices and mappings can be
@@ -74,13 +83,14 @@ crates/
    uses to guess `[[mapping]]` entries from live patching.
 4. **CLI** — the `preamp-bridge` binary wraps all of this with three
    subcommands, `discover`, `init`, and `run` (below). `run` also serves
-   the patch-bay web UI alongside the bridge.
+   the patch-bay web UI alongside the bridge, and scans `--plugins-dir`
+   for dynamically-loadable device plugins at startup.
 
 ## Building
 
 ```sh
 cargo build --workspace
-cargo test --workspace     # 100 tests (both preamp-bridge and mic-monitor), no hardware required
+cargo test --workspace     # 136 tests (both preamp-bridge and mic-monitor), no hardware required
 ```
 
 ## Commands
@@ -158,6 +168,13 @@ trusted operations network. State added through the UI is in-memory only
 (an "export as TOML" button lets you paste it into `bridge.toml` to keep
 it across a restart).
 
+`run` also takes `--plugins-dir <path>` (default `plugins`), scanned at
+startup for dynamically-loadable device plugin `.so`/`.dylib`/`.dll`
+files - see [`docs/plugin-development-guide.md`](docs/plugin-development-guide.md)
+for how to build one. A kind loaded this way works identically to a
+built-in one everywhere in this file - `bridge.toml`, `init`, and the web
+UI don't distinguish between them.
+
 ## Configuring `bridge.toml`
 
 Copy [`bridge.example.toml`](bridge.example.toml) as a starting point.
@@ -174,7 +191,10 @@ address = "10.0.0.10"  # IP on the Dante/control network
 port = 51325           # optional - each kind has a sensible default
 ```
 
-Implemented `kind` values:
+Built-in `kind` values. `osc-x32` ships as a loaded plugin by default
+(see the `run` section above); the rest are still compiled in directly.
+`kind` itself is an open string - a plugin dropped in `--plugins-dir` can
+register any further kind id it declares:
 
 | `kind` | Vendor / device | Protocol | Default port |
 |---|---|---|---|
