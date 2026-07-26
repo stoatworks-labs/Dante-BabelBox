@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use dante_babelbox_mic_adapter_lectrosonics::{LectrosonicsAdapter, DEFAULT_LECTROSONICS_PORT};
 use dante_babelbox_mic_adapter_sennheiser::SennheiserAdapter;
 use dante_babelbox_mic_adapter_shure::ShureAdapter;
 use dante_babelbox_mic_core::{MicAdapter, MicEvent};
@@ -42,6 +43,10 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
             MicKind::SennheiserEwdx => {
                 let addr = SocketAddr::new(mic.address, mic.port.unwrap_or(DEFAULT_SENNHEISER_PORT));
                 Box::new(SennheiserAdapter::new(mic.id.clone(), addr))
+            }
+            MicKind::LectrosonicsDsqd => {
+                let addr = SocketAddr::new(mic.address, mic.port.unwrap_or(DEFAULT_LECTROSONICS_PORT));
+                Box::new(LectrosonicsAdapter::new(mic.id.clone(), addr))
             }
         };
 

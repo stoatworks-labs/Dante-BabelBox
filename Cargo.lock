@@ -392,6 +392,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante-babelbox-mic-adapter-lectrosonics"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dante-babelbox-mic-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "dante-babelbox-mic-adapter-sennheiser"
 version = "0.1.0"
 dependencies = [
@@ -419,6 +429,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dante-babelbox-discovery",
+ "dante-babelbox-mic-adapter-lectrosonics",
  "dante-babelbox-mic-adapter-sennheiser",
  "dante-babelbox-mic-adapter-shure",
  "dante-babelbox-mic-core",

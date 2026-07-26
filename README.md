@@ -3,8 +3,10 @@
 > **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
 > (Anthropic), directed and reviewed by a human author. Adapters are built
 > against official/community-authoritative vendor protocol specs (see each
-> adapter's module doc comment for its source), but this has **not been
-> validated against real hardware** — only against mock devices in the
+> adapter's module doc comment for its source) — with one clearly-flagged
+> exception, the Lectrosonics mic adapter, whose wire format is an unverified
+> placeholder (see the Radio Mic Telemetry status table). Nothing here has been
+> **validated against real hardware** — only against mock devices in the
 > test suite. Review before use on live gear.
 
 Cross-vendor Dante control bridge, currently covering two domains:
@@ -308,12 +310,22 @@ for kinds with none documented (`ah-midi`, `yamaha`).
 | Shure | ULX-D | ASCII command strings (TCP 2202) | Done |
 | Shure | Axient Digital | ASCII command strings (TCP 2202) | Wire framing done; field-level behavior only spot-checked against the doc, see adapter's module comment |
 | Sennheiser | EW-DX EM 2 / EM 2 Dante / EM 4 Dante | Sound Control Protocol, SSC (JSON over UDP) | Done |
+| Lectrosonics | DSQD / D Squared, Duet | Ethernet control port | ⚠️ **Placeholder wire format** — scaffold only, NOT built from an authoritative spec; correct the bytes + set the real port before use. See adapter's module comment |
 
-Both adapters are built from official vendor specs (see each adapter's
-module doc comment for the exact document and URL) and unit/integration
-tested against mocked sockets — same "no guessed wire framing" discipline
-as the preamp adapters, and likewise **not yet validated against real
-hardware**.
+The Shure and Sennheiser adapters are built from official vendor specs
+(see each adapter's module doc comment for the exact document and URL)
+and unit/integration tested against mocked sockets — same "no guessed
+wire framing" discipline as the preamp adapters, and likewise **not yet
+validated against real hardware**.
+
+The **Lectrosonics** adapter is the one exception to that discipline and
+is flagged as such: no equivalent open protocol document was available,
+so its framing, port and field mappings are an unverified **placeholder**
+(mirroring the RFutils adapter of the same name), isolated so a packet
+capture or the official IP-control spec can correct them in one file. It
+keeps the same no-fabrication rule for what it *does* report — audio dBFS
+and RF dBm stay `None` rather than being invented — but treat it as a
+scaffold, not a working adapter, until the wire format is confirmed.
 
 [`docs/mic-telemetry-architecture`](docs/mic-telemetry-architecture.md)
 ([PDF](docs/mic-telemetry-architecture.pdf), [HTML](docs/mic-telemetry-architecture.html))
@@ -338,6 +350,7 @@ crates/
 ├── mic-core/                   # MicAdapter trait, MicState/MicEvent types
 ├── mic-adapter-shure/           # ULX-D + Axient Digital (ASCII over TCP)
 ├── mic-adapter-sennheiser/      # EW-DX EM (JSON/SSC over UDP)
+├── mic-adapter-lectrosonics/    # DSQD / Duet (placeholder wire format)
 └── mic-cli/                     # `mic-monitor` binary: discover, watch
 ```
 
@@ -359,9 +372,9 @@ all) is configured directly by IP in `mics.toml`.
 ```toml
 [[mic]]
 id = "ulxd-1"
-kind = "shure-ulxd"       # shure-ulxd | shure-axient | sennheiser-ewdx
+kind = "shure-ulxd"       # shure-ulxd | shure-axient | sennheiser-ewdx | lectrosonics-dsqd
 address = "10.0.0.30"
-port = 2202                 # optional, defaults to the protocol's standard port (2202 Shure, 45 Sennheiser)
+port = 2202                 # optional, defaults to the protocol's standard port (2202 Shure, 45 Sennheiser, 4992 Lectrosonics placeholder)
 ```
 
 No `[[mapping]]` section — this domain is pure monitoring, nothing to

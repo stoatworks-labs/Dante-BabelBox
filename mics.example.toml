@@ -1,9 +1,13 @@
 # Example mic-monitor configuration. Copy to mics.toml and edit for your rig.
 #
 # Implemented kinds today:
-#   "shure-ulxd"      Shure ULX-D receivers (ASCII command strings, TCP 2202)
-#   "shure-axient"    Shure Axient Digital receivers (same protocol as ULX-D)
-#   "sennheiser-ewdx" Sennheiser EW-DX EM 2 / EM 2 Dante / EM 4 Dante (SSC, UDP 45)
+#   "shure-ulxd"       Shure ULX-D receivers (ASCII command strings, TCP 2202)
+#   "shure-axient"     Shure Axient Digital receivers (same protocol as ULX-D)
+#   "sennheiser-ewdx"  Sennheiser EW-DX EM 2 / EM 2 Dante / EM 4 Dante (SSC, UDP 45)
+#   "lectrosonics-dsqd" Lectrosonics DSQD / Duet — ⚠️ PLACEHOLDER wire format
+#                       (not from an authoritative spec; correct the bytes +
+#                       real port before using on live gear). Default port 4992
+#                       is a guess.
 #
 # No [[mapping]] section - this is monitoring only, nothing to route
 # between devices.
@@ -24,3 +28,11 @@ id = "ewdx-1"
 kind = "sennheiser-ewdx"
 address = "10.0.0.32"
 port = 45
+
+# Placeholder wire format — see the header note. Uncomment once you've
+# confirmed the Lectrosonics control port + framing for your unit.
+# [[mic]]
+# id = "dsqd-1"
+# kind = "lectrosonics-dsqd"
+# address = "10.0.0.33"
+# port = 4992   # placeholder default; set the real port

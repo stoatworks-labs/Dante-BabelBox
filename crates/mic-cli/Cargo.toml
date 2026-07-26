@@ -12,6 +12,7 @@ path = "src/main.rs"
 dante-babelbox-mic-core.workspace = true
 dante-babelbox-mic-adapter-shure.workspace = true
 dante-babelbox-mic-adapter-sennheiser.workspace = true
+dante-babelbox-mic-adapter-lectrosonics.workspace = true
 dante-babelbox-discovery.workspace = true
 tokio.workspace = true
 clap.workspace = true

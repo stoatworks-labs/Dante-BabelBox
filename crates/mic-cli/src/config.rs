@@ -25,6 +25,9 @@ pub enum MicKind {
     ShureUlxd,
     ShureAxient,
     SennheiserEwdx,
+    /// Lectrosonics networked receiver (DSQD / Duet). Wire format is an
+    /// unverified placeholder - see the adapter's module doc comment.
+    LectrosonicsDsqd,
 }
 
 impl Config {
