@@ -1,0 +1,18 @@
+[package]
+name = "diag"
+description = "Logging and crash diagnostics: rotating human-readable logs, machine-readable crash reports, single-file diagnostics bundles"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# Deliberately literal versions rather than `workspace = true`. This crate is
+# vendored into every Rust repo in the fleet, and inheriting from the workspace
+# would make the copy depend on what each workspace happens to declare. As it
+# stands, adding it to a repo is `cp -r` plus one line in `members`.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+time = { version = "0.3", features = ["formatting"] }
