@@ -9,6 +9,7 @@ name = "mic-monitor"
 path = "src/main.rs"
 
 [dependencies]
+diag = { path = "../diag" }
 dante-babelbox-mic-core.workspace = true
 dante-babelbox-mic-adapter-shure.workspace = true
 dante-babelbox-mic-adapter-sennheiser.workspace = true

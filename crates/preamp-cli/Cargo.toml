@@ -9,6 +9,7 @@ name = "preamp-bridge"
 path = "src/main.rs"
 
 [dependencies]
+diag = { path = "../diag" }
 dante-babelbox-oca.workspace = true
 dante-babelbox-core.workspace = true
 dante-babelbox-discovery.workspace = true
