@@ -1,0 +1,11 @@
+# Stoatworks Labs — canonical funding config.
+#
+# This is the master copy. It is distributed to every repo as .github/FUNDING.yml
+# by scripts/sync-funding.sh — edit it HERE, never in an individual repo, then
+# re-run the sync.
+#
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+
+github: [stoatworks-labs]
+patreon: StoatworksLabs
+ko_fi: stoatworkslabs
