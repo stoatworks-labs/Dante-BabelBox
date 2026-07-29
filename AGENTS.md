@@ -85,3 +85,11 @@ cargo run -p preamp-web
 
 There is a separate `Dante-BabelBox-notes` repo holding research notes. Check there before
 re-deriving protocol details.
+
+## Diagnostics
+
+Log via `tracing` as usual; `crates/diag` adds a rotating file, an in-memory ring and a
+panic hook that writes a JSON crash report. Wire it as the **first** thing in `main`, and
+**hold the returned guard** — dropping it (`let _ = diag::init(..)`) silently stops the log
+file being written. Console output goes to stderr; stdout is reserved for program output.
+See [docs/diagnostics.md](docs/diagnostics.md).

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/diag",
     "crates/oca",
     "crates/oca-plugin-abi",
     "crates/core",
