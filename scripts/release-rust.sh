@@ -190,7 +190,16 @@ if [[ -n "$RR_LAUNCHER" ]]; then
   rr_launcher_mac() { # rr_launcher_mac <label> <target>
     local label="$1" target="$2"
     echo "==> launcher ${label}"
-    if [[ -n "$RR_SERVER_BIN" ]]; then
+    # Some launchers stage their payload with their own script (openstage's
+    # stage.sh builds the binaries AND copies the console into
+    # src-tauri/payload/, which is what its tauri.conf.json actually
+    # references). Copying a binary into src-tauri/bin/ for those does nothing
+    # except leave junk behind, and the bundle silently ships whatever the
+    # payload directory happened to contain from a previous run.
+    if [[ -n "${RR_LAUNCHER_PREPARE:-}" ]]; then
+      echo "    staging payload via RR_LAUNCHER_PREPARE"
+      ( cd "$RR_LAUNCHER" && TARGET="$target" eval "$RR_LAUNCHER_PREPARE" )
+    elif [[ -n "$RR_SERVER_BIN" ]]; then
       cargo build --release --target "$target" -p "$RR_SERVER_BIN" 2>/dev/null \
         || cargo build --release --target "$target" --bins
       mkdir -p "$RR_LAUNCHER/src-tauri/bin"
