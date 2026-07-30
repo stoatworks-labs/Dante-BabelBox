@@ -1,0 +1,28 @@
+# Keeps dependencies current across the fleet.
+#
+# Minor and patch bumps are grouped into a single PR per ecosystem per week, so
+# routine drift costs one review rather than twenty. Majors still arrive as
+# their own PRs, because they need reading.
+#
+# Deliberately no `ignore:` rules — an ignore also suppresses the *security*
+# update for that dependency, which is exactly the PR worth having.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      github-actions-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
