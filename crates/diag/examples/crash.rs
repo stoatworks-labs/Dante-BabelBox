@@ -24,9 +24,13 @@ fn main() {
     };
 
     let _guard = diag::init(
-        diag::Options::new("diag-crash-example", "DIAG_EXAMPLE", env!("CARGO_PKG_VERSION"))
-            .with_default_filter("debug")
-            .with_config(&config),
+        diag::Options::new(
+            "diag-crash-example",
+            "DIAG_EXAMPLE",
+            env!("CARGO_PKG_VERSION"),
+        )
+        .with_default_filter("debug")
+        .with_config(&config),
     )
     .expect("starting logging");
 

@@ -20,10 +20,7 @@ pub fn log_dir(app: &str, env_prefix: &str) -> PathBuf {
 
 #[cfg(target_os = "macos")]
 fn platform_log_dir(app: &str) -> PathBuf {
-    home()
-        .join("Library")
-        .join("Logs")
-        .join(app)
+    home().join("Library").join("Logs").join(app)
 }
 
 #[cfg(target_os = "windows")]
