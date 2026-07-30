@@ -119,9 +119,7 @@ pub fn redact(value: &serde_json::Value) -> serde_json::Value {
             let mut out = serde_json::Map::with_capacity(map.len());
             for (k, v) in map {
                 let flat = k.to_ascii_lowercase().replace(['-', '_'], "");
-                let sensitive = SENSITIVE
-                    .iter()
-                    .any(|s| flat.contains(&s.replace('_', "")));
+                let sensitive = SENSITIVE.iter().any(|s| flat.contains(&s.replace('_', "")));
                 out.insert(
                     k.clone(),
                     if sensitive {

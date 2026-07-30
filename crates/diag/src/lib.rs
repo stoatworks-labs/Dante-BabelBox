@@ -224,10 +224,7 @@ pub fn set_config<T: Serialize>(config: &T) {
         Ok(value) => report::redact(&value),
         Err(e) => serde_json::Value::String(format!("<config not serializable: {e}>")),
     };
-    *installed
-        .config
-        .write()
-        .unwrap_or_else(|e| e.into_inner()) = value;
+    *installed.config.write().unwrap_or_else(|e| e.into_inner()) = value;
 }
 
 /// Write a diagnostics bundle and return its path.

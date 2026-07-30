@@ -27,11 +27,7 @@ fn main() {
         .map(|o| !o.stdout.is_empty())
         .unwrap_or(false);
 
-    let rev = if dirty {
-        format!("{sha}-dirty")
-    } else {
-        sha
-    };
+    let rev = if dirty { format!("{sha}-dirty") } else { sha };
     println!("cargo:rustc-env=DIAG_GIT_REV={rev}");
 
     let built_at = std::time::SystemTime::now()
