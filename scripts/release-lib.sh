@@ -136,12 +136,20 @@ rl_ndi_bundle() { # rl_ndi_bundle <label> <stagedir> [--app <BundleName>]
   rl_step "ndi  ${label}"
   # Where the app's own loader looks first, in every implementation in the
   # fleet: Contents/Frameworks inside a bundle, otherwise beside the binary.
+  #
+  # The licence text goes somewhere else inside a bundle. `codesign` treats
+  # every entry in Contents/Frameworks as a subcomponent to sign, and a plain
+  # .txt is not code, so leaving it there fails the whole bundle with "code
+  # object is not signed at all". Contents/Resources is where non-code belongs.
+  local notice_dest
   if [[ "$mode" == "--app" ]]; then
     dest="$stage/$appname/Contents/Frameworks"
+    notice_dest="$stage/$appname/Contents/Resources"
   else
     dest="$stage"
+    notice_dest="$stage"
   fi
-  mkdir -p "$dest"
+  mkdir -p "$dest" "$notice_dest"
   cp "$src/$lib" "$dest/$lib"
 
   # Vizrt requires the runtime licence text to travel with the binary.
@@ -150,7 +158,7 @@ rl_ndi_bundle() { # rl_ndi_bundle <label> <stagedir> [--app <BundleName>]
                 "$src/libndi_licenses.txt" \
                 "$src/../licenses/libndi_licenses.txt"; do
     if [[ -f "$notice" ]]; then
-      cp "$notice" "$dest/libndi_licenses.txt"; break
+      cp "$notice" "$notice_dest/libndi_licenses.txt"; break
     fi
   done
 
