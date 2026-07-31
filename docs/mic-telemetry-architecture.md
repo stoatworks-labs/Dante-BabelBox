@@ -147,7 +147,7 @@ ewdx-1 ch1: battery=72% runtime=245min rf=-50dBm quality=88% af=-18dBFS antenna=
 
 ---
 
-Part of Dante-BabelBox — see [README.md](README.md) and
-[USAGE.md](USAGE.md) for the full status tables and config reference.
+Part of Dante-BabelBox — see [README.md](../README.md) and
+[USAGE.md](../USAGE.md) for the full status tables and config reference.
 Not yet validated against real hardware — every test here runs against a
 mocked socket.
