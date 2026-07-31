@@ -35,6 +35,58 @@ flowchart LR
     BB --> STATE["Unified gain / phantom state<br/>+ radio-mic telemetry"]
 ```
 
+<!-- downloads:start -->
+
+## Download
+
+**[v0.1.1](https://github.com/stoatworks-labs/Dante-BabelBox/releases/tag/v0.1.1)** — prebuilt for macOS, Windows and Linux. Pick your platform:
+
+<details>
+<summary><b>macOS</b> — Apple Silicon, Intel</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| Apple Silicon · .dmg disk image (CLI) | [`dante-babelbox-0.1.1-macos-aarch64-cli.dmg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-aarch64-cli.dmg) | 6.9 MB |
+| Intel · .dmg disk image (CLI) | [`dante-babelbox-0.1.1-macos-x86_64-cli.dmg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-x86_64-cli.dmg) | 7.1 MB |
+| Apple Silicon · .pkg installer (CLI) | [`dante-babelbox-0.1.1-macos-aarch64-cli.pkg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-aarch64-cli.pkg) | 6.2 MB |
+| Intel · .pkg installer (CLI) | [`dante-babelbox-0.1.1-macos-x86_64-cli.pkg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-x86_64-cli.pkg) | 6.4 MB |
+| Apple Silicon · .tar.gz archive | [`dante-babelbox-macos-aarch64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-macos-aarch64.tar.gz) | 4.3 MB |
+| Intel · .tar.gz archive | [`dante-babelbox-macos-x86_64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-macos-x86_64.tar.gz) | 4.4 MB |
+
+</details>
+
+<details>
+<summary><b>Windows</b> — x64, ARM64</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| x64 · .exe installer | [`dante-babelbox-0.1.1-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-windows-x86_64-setup.exe) | 3.0 MB |
+| ARM64 · .exe installer | [`dante-babelbox-0.1.1-windows-aarch64-setup.exe`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-windows-aarch64-setup.exe) | 2.7 MB |
+| x64 · .zip archive | [`dante-babelbox-windows-x86_64.zip`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-windows-x86_64.zip) | 3.8 MB |
+| ARM64 · .zip archive | [`dante-babelbox-windows-aarch64.zip`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-windows-aarch64.zip) | 3.6 MB |
+
+</details>
+
+<details>
+<summary><b>Linux</b> — x64, ARM64</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| x64 · .deb package (Debian/Ubuntu) | [`dante-babelbox_0.1.1_amd64.deb`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox_0.1.1_amd64.deb) | 4.8 MB |
+| ARM64 · .deb package (Debian/Ubuntu) | [`dante-babelbox_0.1.1_arm64.deb`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox_0.1.1_arm64.deb) | 4.9 MB |
+| x64 · .rpm package (Fedora/RHEL) | [`dante-babelbox-0.1.1-1.x86_64.rpm`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-1.x86_64.rpm) | 5.0 MB |
+| ARM64 · .rpm package (Fedora/RHEL) | [`dante-babelbox-0.1.1-1.aarch64.rpm`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-1.aarch64.rpm) | 5.1 MB |
+| x64 · .tar.gz archive | [`dante-babelbox-linux-x86_64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-linux-x86_64.tar.gz) | 4.7 MB |
+| ARM64 · .tar.gz archive | [`dante-babelbox-linux-aarch64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-linux-aarch64.tar.gz) | 4.8 MB |
+
+</details>
+
+All builds, checksums and release notes: [github.com/stoatworks-labs/Dante-BabelBox/releases](https://github.com/stoatworks-labs/Dante-BabelBox/releases).
+
+These builds are unsigned, so macOS and Windows each warn once on first launch — see [Unsigned builds — Gatekeeper, SmartScreen & Defender Firewall](#unsigned-builds--gatekeeper-smartscreen--defender-firewall) for the one-time fix.
+
+<!-- downloads:end -->
+
 ## Preamp Control — Status
 
 | Vendor | Device | Protocol | Status |
@@ -388,51 +440,26 @@ packet captures of a real console+device pairing to learn the display's
 own query/identity handshake. Deferred until there's real hardware
 access.
 
-## Unsigned builds — macOS Gatekeeper & Windows SmartScreen
+## Unsigned builds — Gatekeeper, SmartScreen & Defender Firewall
 
-The release binaries are **not code-signed or notarized** — that needs paid
-Apple / Windows developer certificates this project doesn't carry. The binaries
-are safe to run; the OS just can't verify a publisher, so it warns you the first
-time. Here's how to get past that, and how to sign them yourself if you'd rather.
+The release binaries are **not code-signed or notarized** — that needs paid Apple
+and Microsoft developer certificates this project doesn't carry. The downloads are
+fine; the OS just can't identify the publisher, so it warns you the first time.
 
-### macOS
+- **macOS** — *"cannot be opened because the developer cannot be verified"*.
+  Right-click the app → **Open** → **Open**, or clear the flag:
+  `xattr -dr com.apple.quarantine "/Applications/Dante-BabelBox.app"`
+- **Windows** — SmartScreen shows *"Windows protected your PC"* →
+  **More info** → **Run anyway**.
+- **Windows Defender Firewall** — first launch pops *"Allow Dante-BabelBox to
+  communicate on these networks"*. Tick **Private** (and **Domain** on a managed
+  network) — Dante-BabelBox needs it to serve the patch-bay UI and reach preamps and
+  radio-mic receivers on the audio LAN. Deny it and no devices will be discovered and
+  gain/phantom changes won't reach the hardware.
+- **Linux** — no signing gate.
 
-These are command-line binaries, so clear the quarantine flag in Terminal. After
-extracting the archive, `cd` into it and run:
-
-```sh
-xattr -dr com.apple.quarantine ./<binary>   # remove the "unverified developer" flag
-chmod +x ./<binary>                          # ensure it's executable
-./<binary> --help
-```
-
-Or run it once, let macOS block it, then go to **System Settings → Privacy &
-Security** and click **Open Anyway**.
-
-### Windows
-
-Running the `.exe` may show **"Windows protected your PC"** (SmartScreen) — click
-**More info → Run anyway**. If you extracted it from a `.zip`, you can clear the
-flag first: right-click the `.exe` → **Properties** → tick **Unblock** → **OK**,
-or in PowerShell `Unblock-File .\<binary>.exe`.
-
-### Linux
-
-No signing gate — just `chmod +x ./<binary>` (or install the `.deb`/`.rpm`).
-
-### Signing it yourself (optional)
-
-On macOS an *ad-hoc* signature stops repeated prompts on your own machine (it is
-**not** notarization — it won't clear Gatekeeper on someone else's Mac):
-
-```sh
-codesign --force --sign - ./<binary>
-```
-
-Clearing the warnings for redistribution needs paid certificates: an **Apple
-Developer Program** membership ($99/yr) + a *Developer ID Application* cert with
-`xcrun notarytool` on macOS, or an **Authenticode** code-signing certificate from
-a CA (`signtool sign`) on Windows.
+Per-artifact steps, self-signing, checksum verification and the Defender Firewall reset
+procedure: **[docs/UNSIGNED.md](docs/UNSIGNED.md)**.
 
 ## Roadmap / TODO
 
