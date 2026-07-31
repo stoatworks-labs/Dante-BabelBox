@@ -56,6 +56,161 @@ rl_numver() {
   printf '%s' "$n"
 }
 
+# --------------------------------------------------------------------- NDI --
+#
+# Shipping the NDI runtime inside an installer.
+#
+# NDI's licence permits this — the SDK is royalty-free and Vizrt's Software
+# Distribution page explicitly allows both shipping the libraries inside an
+# application folder and bundling the redistributable installer. The condition
+# is that the licence *you* distribute under must forbid modifying,
+# reverse-engineering, disassembling and decompiling the SDK.
+#
+# That condition is why the source repos cannot carry NDI binaries: MIT grants
+# exactly those rights. An installer is different — it has its own EULA, which
+# `rl_eula` generates with the required terms, and which `rl_nsis`/`rl_pkg`
+# then present. So this is the one place in the fleet where the runtime may
+# legitimately be shipped.
+#
+# Two obligations come with it, and neither is automatic:
+#   * the bundled version must be kept current
+#   * NDI Tools must NOT be redistributed (link to https://ndi.video/tools)
+#
+# Opt-in per project, never on by default: a project that calls neither
+# function ships exactly as it did before.
+#
+#   rl_ndi_bundle windows-x86_64 "$stage"                  # beside the .exe
+#   rl_ndi_bundle macos-arm64    "$stage" --app "Foo.app"  # Contents/Frameworks
+#
+# The runtime for a target usually is not on the release host (a Mac cutting
+# Linux and Windows builds), so each target's directory is named explicitly:
+#
+#   RL_NDI_DIR_MACOS_ARM64, RL_NDI_DIR_WINDOWS_X86_64,
+#   RL_NDI_DIR_LINUX_X86_64, ...   (uppercased label, '-' -> '_')
+#
+# macOS falls back to the locally installed SDK. A target with nothing set is
+# skipped, not failed — a release without NDI bundled is still a valid release,
+# because every app in the fleet loads the runtime dynamically and degrades to
+# "NDI unavailable, here is the download" when it is absent.
+
+RL_NDI_BUNDLED=0        # set by rl_ndi_bundle; read by rl_eula
+RL_NDI_REDIST_URL="${RL_NDI_REDIST_URL:-https://ndi.video/for-developers/ndi-sdk/}"
+
+# Library filename for a target label.
+rl_ndi_libname() { # rl_ndi_libname <label>
+  case "$1" in
+    macos-*)   printf 'libndi.dylib' ;;
+    windows-*) printf 'Processing.NDI.Lib.x64.dll' ;;
+    *)         printf 'libndi.so.6' ;;
+  esac
+}
+
+# Directory holding the runtime for a target label, or empty.
+rl_ndi_srcdir() { # rl_ndi_srcdir <label>
+  local label="$1" var dir
+  var="RL_NDI_DIR_$(printf '%s' "$label" | tr '[:lower:]-' '[:upper:]_')"
+  dir="${!var:-}"
+  if [[ -n "$dir" ]]; then printf '%s' "$dir"; return 0; fi
+  # Only the host's own platform can be discovered locally.
+  if [[ "$label" == macos-* && "$(uname -s)" == "Darwin" ]]; then
+    for dir in "/Library/NDI SDK for Apple/lib/macOS" \
+               "/Library/NDI SDK for macOS/lib/macOS" \
+               "/usr/local/lib" "/opt/homebrew/lib"; do
+      [[ -f "$dir/libndi.dylib" ]] && { printf '%s' "$dir"; return 0; }
+    done
+  fi
+  printf ''
+}
+
+rl_ndi_bundle() { # rl_ndi_bundle <label> <stagedir> [--app <BundleName>]
+  local label="$1" stage="$2" mode="${3:-}" appname="${4:-}"
+  local lib src dest
+  lib="$(rl_ndi_libname "$label")"
+  src="$(rl_ndi_srcdir "$label")"
+
+  if [[ -z "$src" || ! -f "$src/$lib" ]]; then
+    rl_skip "${label} NDI runtime (set RL_NDI_DIR_$(printf '%s' "$label" | tr '[:lower:]-' '[:upper:]_') to a directory containing ${lib})"
+    return 0
+  fi
+
+  rl_step "ndi  ${label}"
+  # Where the app's own loader looks first, in every implementation in the
+  # fleet: Contents/Frameworks inside a bundle, otherwise beside the binary.
+  if [[ "$mode" == "--app" ]]; then
+    dest="$stage/$appname/Contents/Frameworks"
+  else
+    dest="$stage"
+  fi
+  mkdir -p "$dest"
+  cp "$src/$lib" "$dest/$lib"
+
+  # Vizrt requires the runtime licence text to travel with the binary.
+  local notice
+  for notice in "$src/../../licenses/libndi_licenses.txt" \
+                "$src/libndi_licenses.txt" \
+                "$src/../licenses/libndi_licenses.txt"; do
+    if [[ -f "$notice" ]]; then
+      cp "$notice" "$dest/libndi_licenses.txt"; break
+    fi
+  done
+
+  RL_NDI_BUNDLED=1
+  local shown="${dest#"$stage"}"; shown="${shown#/}"
+  rl_note "${lib} -> ${shown:-<stage root>}"
+}
+
+# ------------------------------------------------------------------- EULA ---
+#
+# Writes the licence text an installer presents, and echoes its path. The
+# project's own LICENSE, plus — when rl_ndi_bundle has run — the terms Vizrt
+# requires a redistributor to impose. Call *after* rl_ndi_bundle.
+#
+# Returns empty (and writes nothing) when there is no project LICENSE and no
+# NDI to cover, so installers keep their current no-licence-page behaviour.
+
+rl_eula() { # rl_eula [<path-to-project-LICENSE>]
+  local license="${1:-}" out
+  [[ -z "$license" || ! -f "$license" ]] && license=""
+  if [[ -z "$license" && $RL_NDI_BUNDLED -eq 0 ]]; then printf ''; return 0; fi
+
+  out="$(mktemp -t rl_eula).txt"
+  {
+    printf '%s %s\n\n' "$RL_NAME" "$RL_VERSION"
+    if [[ -n "$license" ]]; then cat "$license"; printf '\n'; fi
+    if (( RL_NDI_BUNDLED )); then
+      cat <<'NDIEULA'
+
+--------------------------------------------------------------------------
+NDI(R) RUNTIME - ADDITIONAL TERMS
+--------------------------------------------------------------------------
+
+This installer includes the NDI(R) runtime library, redistributed under
+licence from Vizrt NDI AB. NDI(R) is a registered trademark of Vizrt NDI AB.
+See https://ndi.video.
+
+By installing this software you agree that, with respect to the NDI SDK and
+the NDI runtime library included here, you will NOT:
+
+  * modify the SDK or any part of it;
+  * reverse engineer, disassemble or decompile the SDK or any NDI product,
+    or any part thereof;
+  * circumvent any technical limitations in the SDK.
+
+These restrictions apply to the NDI components only. They do not restrict
+your rights in the rest of this software, which remain governed by its own
+licence above.
+
+NDI Tools are not included with, and are not redistributed by, this
+installer. Obtain them from https://ndi.video/tools.
+
+H.264, H.265 and AAC are separately licensable formats not covered by the
+NDI SDK grant.
+NDIEULA
+    fi
+  } >"$out"
+  printf '%s' "$out"
+}
+
 # ---------------------------------------------------------------- archives --
 
 rl_zip() {   # rl_zip <label> <stagedir>
@@ -84,6 +239,9 @@ rl_targz() { # rl_targz <label> <stagedir>
 # Windows-style paths into the script, hence the sed dance.
 
 rl_nsis() { # rl_nsis <label> <stagedir> --cli | --gui <exe>
+  # RL_EULA (optional, from rl_eula) adds a licence page. Required when the NDI
+  # runtime is bundled — that is the condition Vizrt's redistribution grant
+  # rests on, so it is not cosmetic.
   local label="$1" stage="$2" mode="$3" guiexe="${4:-}"
   if ! command -v makensis >/dev/null 2>&1; then
     rl_skip "${label} NSIS installer (makensis not installed)"; return 0
@@ -125,6 +283,14 @@ rl_nsis() { # rl_nsis <label> <stagedir> --cli | --gui <exe>
   install_lines=$(printf '%s\n' "${install_arr[@]}")
   uninstall_files=$( ((${#unfiles_arr[@]})) && printf '%s\n' "${unfiles_arr[@]}" || true )
   uninstall_dirs=$(  ((${#undirs_arr[@]}))  && printf '%s\n' "${undirs_arr[@]}"  || true )
+
+  # NSIS needs the licence as a CRLF file it can read at compile time.
+  local licpage=""
+  if [[ -n "${RL_EULA:-}" && -f "${RL_EULA:-}" ]]; then
+    local lic="$work/eula.txt"
+    sed -e 's/$/\r/' "$RL_EULA" >"$lic"
+    licpage="!insertmacro MUI_PAGE_LICENSE \"${lic}\""
+  fi
 
   local shortcuts="" unshortcuts="" pathblock="" unpathblock=""
   if [[ "$mode" == "--gui" ]]; then
@@ -179,6 +345,7 @@ VIAddVersionKey "ProductVersion"  "${RL_VERSION}"
 VIAddVersionKey "LegalCopyright"  "${RL_PUBLISHER}"
 
 !define MUI_ABORTWARNING
+${licpage}
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -341,10 +508,21 @@ rl_pkg() { # rl_pkg <label> <stagedir> --cli | --app <BundleName>
 
   pkgbuild "${pkgbuild_args[@]}" "$component" >/dev/null
 
+  # A licence page, when there is a EULA to show. Required when the NDI runtime
+  # is bundled: presenting those terms is the condition Vizrt's redistribution
+  # grant rests on. productbuild resolves <license> against --resources.
+  local licref=""
+  if [[ -n "${RL_EULA:-}" && -f "${RL_EULA:-}" ]]; then
+    mkdir -p "$work/resources"
+    cp "$RL_EULA" "$work/resources/LICENSE.txt"
+    licref='<license file="LICENSE.txt"/>'
+  fi
+
   cat >"$work/distribution.xml" <<DIST
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
     <title>${RL_NAME} ${RL_VERSION}</title>
+    ${licref}
     <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
     <domains enable_localSystem="true"/>
     <pkg-ref id="${RL_IDENT}"/>
@@ -355,8 +533,9 @@ rl_pkg() { # rl_pkg <label> <stagedir> --cli | --app <BundleName>
 DIST
 
   rm -f "$outfile"
-  productbuild --distribution "$work/distribution.xml" \
-               --package-path "$work" "$outfile" >/dev/null
+  local pb_args=(--distribution "$work/distribution.xml" --package-path "$work")
+  [[ -n "$licref" ]] && pb_args+=(--resources "$work/resources")
+  productbuild "${pb_args[@]}" "$outfile" >/dev/null
   rl_note "$(basename "$outfile")"
   rm -rf "$work"
 }
