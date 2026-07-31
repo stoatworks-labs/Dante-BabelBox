@@ -96,13 +96,33 @@ rl_numver() {
 RL_NDI_BUNDLED=0        # set by rl_ndi_bundle; read by rl_eula
 RL_NDI_REDIST_URL="${RL_NDI_REDIST_URL:-https://ndi.video/for-developers/ndi-sdk/}"
 
-# Library filename for a target label.
+# The filename the application's loader looks for. This is what the runtime is
+# installed *as*, which is not always what the SDK ships it as — see
+# rl_ndi_srcfile.
 rl_ndi_libname() { # rl_ndi_libname <label>
   case "$1" in
-    macos-*)   printf 'libndi.dylib' ;;
-    windows-*) printf 'Processing.NDI.Lib.x64.dll' ;;
-    *)         printf 'libndi.so.6' ;;
+    macos-*)          printf 'libndi.dylib' ;;
+    windows-aarch64)  printf '' ;;   # see below
+    windows-*)        printf 'Processing.NDI.Lib.x64.dll' ;;
+    *)                printf 'libndi.so.6' ;;
   esac
+}
+
+# The file to copy *from*, which may be named differently.
+#
+# The Linux SDK ships `libndi.so.6.3.2` and no `libndi.so.6` symlink, so match
+# the versioned name too and install it under the name the loader wants. This is
+# safe because the library is opened by path with dlopen, where the filename
+# need not match the SONAME.
+rl_ndi_srcfile() { # rl_ndi_srcfile <dir> <libname>
+  local dir="$1" lib="$2" f
+  if [[ -f "$dir/$lib" ]]; then printf '%s' "$dir/$lib"; return 0; fi
+  if [[ "$lib" == libndi.so.6 ]]; then
+    for f in "$dir"/libndi.so.6.*; do
+      [[ -f "$f" ]] && { printf '%s' "$f"; return 0; }
+    done
+  fi
+  printf ''
 }
 
 # Directory holding the runtime for a target label, or empty.
@@ -124,11 +144,22 @@ rl_ndi_srcdir() { # rl_ndi_srcdir <label>
 
 rl_ndi_bundle() { # rl_ndi_bundle <label> <stagedir> [--app <BundleName>]
   local label="$1" stage="$2" mode="${3:-}" appname="${4:-}"
-  local lib src dest
+  local lib src srcfile dest
   lib="$(rl_ndi_libname "$label")"
-  src="$(rl_ndi_srcdir "$label")"
 
-  if [[ -z "$src" || ! -f "$src/$lib" ]]; then
+  # Vizrt ships no ARM64 Windows runtime — the NDI 6 redistributable contains
+  # x64 and x86 only. A native ARM64 process cannot load either, so there is
+  # nothing to bundle and nothing the operator could install to fix it. Skipping
+  # is the honest outcome; staging the x64 DLL would look right and never load.
+  if [[ -z "$lib" ]]; then
+    rl_skip "${label} NDI runtime (Vizrt ships no ARM64 Windows runtime)"
+    return 0
+  fi
+
+  src="$(rl_ndi_srcdir "$label")"
+  srcfile="$([[ -n "$src" ]] && rl_ndi_srcfile "$src" "$lib")"
+
+  if [[ -z "$srcfile" ]]; then
     rl_skip "${label} NDI runtime (set RL_NDI_DIR_$(printf '%s' "$label" | tr '[:lower:]-' '[:upper:]_') to a directory containing ${lib})"
     return 0
   fi
@@ -150,7 +181,7 @@ rl_ndi_bundle() { # rl_ndi_bundle <label> <stagedir> [--app <BundleName>]
     notice_dest="$stage"
   fi
   mkdir -p "$dest" "$notice_dest"
-  cp "$src/$lib" "$dest/$lib"
+  cp "$srcfile" "$dest/$lib"
 
   # Vizrt requires the runtime licence text to travel with the binary.
   local notice
