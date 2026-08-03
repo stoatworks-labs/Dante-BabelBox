@@ -33,6 +33,14 @@ pub enum AntennaDiversity {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MicState {
     pub battery_percent: Option<u8>,
+    /// Battery charge as a segment count on the receiver's own display,
+    /// for control paths that report bars rather than a percentage (e.g.
+    /// Shure's ACN `0x02001100`, 0-5). Kept separate from
+    /// `battery_percent` on purpose: multiplying bars out into a
+    /// percentage would claim a precision the wire never carried. An
+    /// adapter populates whichever one its protocol actually reports, and
+    /// may populate both if the device sends both.
+    pub battery_bars: Option<u8>,
     pub battery_minutes_remaining: Option<u16>,
     /// RF signal strength in dBm. Vendors that report a raw scale instead
     /// convert it in their adapter, per that vendor's documented formula

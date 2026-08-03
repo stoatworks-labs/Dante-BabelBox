@@ -62,6 +62,7 @@ mod tests {
         async fn get_state(&mut self, _channel: u16) -> AdapterResult<MicState> {
             Ok(MicState {
                 battery_percent: Some(80),
+                battery_bars: None,
                 battery_minutes_remaining: Some(300),
                 rf_level_dbm: Some(-45.0),
                 rf_quality_percent: Some(92),
@@ -97,6 +98,7 @@ mod tests {
             address: MicAddress::new("ulxd-1", 2),
             state: MicState {
                 battery_percent: Some(55),
+                battery_bars: None,
                 battery_minutes_remaining: Some(120),
                 rf_level_dbm: Some(-52.0),
                 rf_quality_percent: Some(78),

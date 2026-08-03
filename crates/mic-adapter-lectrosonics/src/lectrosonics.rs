@@ -92,6 +92,7 @@ impl LectrosonicsAdapter {
 fn empty_state() -> MicState {
     MicState {
         battery_percent: None,
+        battery_bars: None,
         battery_minutes_remaining: None,
         // No documented raw->dBm conversion; a placeholder RF field is carried
         // as rf_quality_percent instead (see module doc comment).

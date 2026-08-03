@@ -423,6 +423,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante-babelbox-mic-adapter-shure-acn"
+version = "0.1.1"
+dependencies = [
+ "async-trait",
+ "dante-babelbox-core",
+ "dante-babelbox-mic-core",
+ "socket2 0.5.10",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "dante-babelbox-mic-cli"
 version = "0.1.1"
 dependencies = [
@@ -557,6 +570,7 @@ dependencies = [
  "async-trait",
  "dante-babelbox-core",
  "rosc",
+ "socket2 0.5.10",
  "tokio",
  "tokio-util",
  "tracing",

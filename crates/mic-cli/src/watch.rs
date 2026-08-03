@@ -141,6 +141,7 @@ mod tests {
             address: MicAddress::new("ulxd-1", 1),
             state: MicState {
                 battery_percent: Some(82),
+                battery_bars: None,
                 battery_minutes_remaining: None,
                 rf_level_dbm: Some(-45.0),
                 rf_quality_percent: None,

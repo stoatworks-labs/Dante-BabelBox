@@ -104,7 +104,8 @@ Searching the UDP payload for the bytes `MBC` is a reliable shortcut when
 - `len` — **counts from `len_lo` to the end of the block**, so
   `len(body) == len - 4`. This matters: several messages are shorter than
   their ConMon packet, and several are longer than the bytes actually
-  present when the packet ends. Trust `len`, not the packet boundary.
+  present when the packet ends. **But `len` is not always right either — see
+  §4.1 before writing a parser.**
 - `src_mac` / `dst_mac` — **Yamaha** MACs. The console appears as
   `00:a0:de:e0:ce:f6`, which is *not* its Dante MAC. Broadcast-style messages
   use `ff:ff:ff:ff:ff:ff` as the destination.
@@ -125,6 +126,31 @@ subop:u8 | count:u16 | start_index:u16 | data[count × width] | checksum:u8
 `count` is the number of *elements*, not bytes; `width` comes from the subop.
 A body with `count = 1` and no data bytes is a **read request** — the console
 uses this to poll.
+
+### 4.1 Finding the real end of a block
+
+An earlier pass took `len` as authoritative. It is right for steady-state
+broadcasts and **wrong for replies to a query**, which is how §6 came to record
+several subops as "never populated" when they had in fact been answered in full.
+
+When a device answers a `count = N` read request it **echoes the query's `len`
+unchanged — usually 10 — and appends the data past the boundary that `len`
+implies.** A parser that trusts `len` sees an empty query and silently discards
+the payload. In the reference capture that hides 32 bytes on subop `0x18`, 64 on
+`0x19` and `0x1a`, and the entire populated phantom array on one frame.
+
+Neither boundary is reliable on its own, so use the **checksum to decide**. Take
+the candidate ends — the one `len` implies, and the one the ConMon vendor length
+at envelope offset 40 implies — and accept whichever produces a block that sums
+to `0x3F`. The checksum is a strong enough discriminator to settle it: across
+3 907 captured messages no block validated under the wrong boundary.
+
+Two related cautions for the envelope field itself:
+
+- The low byte of the offset-40 length is `0xC0` on 3 889 frames but `0x00` on
+  15 and `0x80` on 3. Read the high byte; don't require the low byte to match.
+- A single ConMon packet can carry more than one MBC block, so a block also ends
+  wherever the next `MBC` magic begins.
 
 ## 5. Confirmed messages
 
@@ -188,18 +214,34 @@ Present in the capture with a stable shape but no confirmed meaning.
 | `0x0731` | `02` | 24 × uint8, all zero throughout — note **24**, not 32 |
 | `0x0742` | `00` | metering (above) |
 
-### Why the remaining `0x0722` subops stayed blank
+### The remaining `0x0722` subops — corrected
 
-Across 5 301 ConMon frames — including the 32 packets that carry more than one
-MBC block — these subops appear **only in their query form**: `count = 32`,
-`start_index = 0`, no data. The console asks for them once at pairing; nothing
-ever populated them, because none of those parameters was touched while
-capturing.
+> **This section previously said these subops were never populated. That was
+> wrong, and the error was in the parser, not on the wire.** They *were*
+> answered, in full, during pairing. See §4.1 for why the data was invisible.
 
-So their element count (32, one per input) is known and their addressing is
-known, but their **element width and meaning are not**. Do not guess: a 32-slot
-array is equally consistent with HPF frequency, HPF on/off, digital trim,
-polarity, pad, insert state or metering mode.
+The stagebox answers the console's pairing queries with real data, and the
+element widths are therefore known:
+
+| Subop | Shape | Value at pairing |
+|---|---|---|
+| `0x10` | 1 × uint8 | `1` |
+| `0x12` | 1 × uint8 | `13` |
+| `0x13` | 1 × uint8 | `0` |
+| `0x14` | 1 × uint8 | `0` — also polled continuously, ~every 2 s |
+| `0x15` | 1 × uint8 | `0` |
+| `0x18` | 32 × uint8 | all `0` |
+| `0x19` | 32 × **int16** | all `800` |
+| `0x1a` | 32 × **int16** | all `−600` |
+| `0x1b` | 32 × uint8 | all `0` |
+
+So element count, addressing **and width** are now evidence-backed. What is
+still unknown is **meaning**, because no such parameter was touched during the
+capture — every value above is a resting default. Do not guess from the
+defaults: `0x1a` reading −600 makes it tempting to call it a second gain array
+(it matches `0x16` exactly at that moment), and `0x19` reading 800 makes 80.0 Hz
+HPF tempting, but neither was ever observed to *move*, and a value that never
+changes proves nothing about what it means.
 
 Mapping them is a ten-minute job with hardware, and needs nothing clever — put a
 capture on the control network and, pausing a few seconds between each so the
@@ -364,7 +406,17 @@ the console-wins pairing behaviour; the ConMon envelope; and — by successful
 transmission — the ability to *set* gain on a real Rio3224-D2.
 
 **Not validated:** any of this from inside Dante-BabelBox. The write was
-performed by a standalone Python script, not by `preamp-adapter-yamaha`. No
-crate in this workspace has yet driven real hardware, so the README's honesty
-warning stands. What has changed is that the protocol is no longer guesswork —
-an adapter built to this document can be expected to work.
+performed by a standalone Python script — which is **no longer on disk**; only
+the reference implementation in §10 and the accepted packets themselves
+survive. No crate in this workspace has yet driven real hardware, so the
+README's honesty warning stands.
+
+**What exists now:** `preamp-adapter-yamaha`'s `mbc` module implements this
+document. Its codec is unit-tested against frames lifted straight out of the
+capture, including the one the Rio accepted — `gain_broadcast` rebuilds that
+packet byte for byte from scratch. That makes the *encoder* verified against
+hardware-accepted bytes. The adapter's socket handling, multicast join and
+state tracking are not verified against anything but a loopback socket.
+
+**The captures themselves** now live in the private `dante-captures` repo,
+audio-stripped, with per-file provenance. The raw 1.7 GB original is local-only.

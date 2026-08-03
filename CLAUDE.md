@@ -14,7 +14,8 @@ Cross-vendor Dante preamp + mic bridge (Rust). Normalizes preamp control and wir
 - `core` / `mic-core` — shared traits & models
 - `discovery` — Dante device discovery
 - `preamp-adapter-{osc,ah,yamaha}` — preamp vendor adapters
-- `mic-adapter-{shure,sennheiser,lectrosonics}` — wireless-mic vendor adapters (lectrosonics = placeholder wire format)
+- `preamp-adapter-yamaha` also carries `mbc` — Rio/Tio + QL/CL head amps over Audinate ConMon
+- `mic-adapter-{shure,sennheiser,lectrosonics}` — wireless-mic vendor adapters (lectrosonics = placeholder wire format); `mic-adapter-shure-acn` = QLX-D on a console, read-only
 - `preamp-cli` / `mic-cli` — command-line entrypoints
 - `preamp-web` — web UI
 

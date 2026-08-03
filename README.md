@@ -14,10 +14,11 @@
 > **rebuilt from that documentation and transmitted back — the stagebox
 > accepted it and changed its gain.** See
 > [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md).
-> That is a *protocol* proven on hardware, not *code* proven on hardware: the
-> write came from a standalone script, and the Rio adapter is still
-> unimplemented. But anyone building it is now working from a verified wire
-> format rather than a vendor PDF.
+> That is a *protocol* proven on hardware, not *code* proven on hardware. The
+> adapter now exists (`MbcAdapter`) and its codec reproduces, byte for byte,
+> the frame the Rio accepted — but the adapter itself has still never been run
+> against a real device. The wire format is verified; the code around it is
+> tested against captured frames, like everything else here.
 
 Cross-vendor Dante control bridge, currently covering two domains:
 
@@ -106,8 +107,9 @@ These builds are unsigned, so macOS and Windows each warn once on first launch �
 | Allen & Heath | dLive | NRPN-over-TCP (Socket addressing) | Done |
 | Allen & Heath | Qu, SQ | — | Not implemented — no public preamp-control spec exists |
 | Yamaha | DM3 / DM3S | OSC | Done |
-| Yamaha | DM7, CL, QL | — | Not implemented — no public spec (see below) |
-| Yamaha | Rio, Tio | Legacy AD8HR (MIDI SysEx) | Not implemented — setup docs exist, wire format doesn't |
+| Yamaha | CL, QL | `MBC` over Audinate ConMon | Partial — a QL/CL is the *controlling* side of the captured protocol, and the same adapter addresses it. Driving a console's own **local** head amps was never observed on the wire, so it is untested and may not be supported at all |
+| Yamaha | DM7 | — | Not implemented — no public spec, and nothing confirms it shares DM3's OSC dialect or the R-series `MBC` block |
+| Yamaha | Rio, Tio (R-series) | `MBC` over Audinate ConMon | Implemented — gain, +48 V and metering, from a wire format [captured and proven on real hardware](docs/yamaha-ha-remote-over-dante.md). Never run against a device. |
 
 Every "Done" adapter is built from an official vendor spec (or, for the
 X32 family, the long-established community reference), not guesswork, and
@@ -373,6 +375,7 @@ for kinds with none documented (`ah-midi`, `yamaha`).
 | Shure | Axient Digital | ASCII command strings (TCP 2202) | Wire framing done; field-level behavior only spot-checked against the doc, see adapter's module comment |
 | Sennheiser | EW-DX EM 2 / EM 2 Dante / EM 4 Dante | Sound Control Protocol, SSC (JSON over UDP) | Done |
 | Lectrosonics | DSQD / D Squared, Duet | Ethernet control port | ⚠️ **Placeholder wire format** — scaffold only, NOT built from an authoritative spec; correct the bytes + set the real port before use. See adapter's module comment |
+| Shure | QLX-D **mounted on a console** | ANSI E1.17 ACN (SLPv2 + SDT/DMP over UDP) | Discovery + passive telemetry, reverse-engineered from real hardware. **Read-only, and needs a mirrored port** — the receiver unicasts its events to the console. Cannot open its own session; see the adapter's module comment |
 
 The Shure and Sennheiser adapters are built from official vendor specs
 (see each adapter's module doc comment for the exact document and URL)
@@ -417,6 +420,7 @@ Dante audio is never touched at all.
 crates/
 ├── mic-core/                   # MicAdapter trait, MicState/MicEvent types
 ├── mic-adapter-shure/           # ULX-D + Axient Digital (ASCII over TCP)
+├── mic-adapter-shure-acn/       # QLX-D on a console (ACN: SLPv2 + SDT/DMP)
 ├── mic-adapter-sennheiser/      # EW-DX EM (JSON/SSC over UDP)
 ├── mic-adapter-lectrosonics/    # DSQD / Duet (placeholder wire format)
 └── mic-cli/                     # `mic-monitor` binary: discover, watch

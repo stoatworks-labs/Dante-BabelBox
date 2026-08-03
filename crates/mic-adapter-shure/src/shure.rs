@@ -107,6 +107,7 @@ impl ShureAdapter {
 fn empty_state() -> MicState {
     MicState {
         battery_percent: None,
+        battery_bars: None,
         battery_minutes_remaining: None,
         rf_level_dbm: None,
         // Shure has no separate signal-quality indicator distinct from
