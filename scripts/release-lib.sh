@@ -16,10 +16,14 @@
 #
 #   brew install makensis create-dmg
 #
-# macOS artefacts are NOT code-signed. Unsigned .pkg and .dmg payloads are
-# quarantined by Gatekeeper on download, and approving the outer app does NOT
-# unquarantine nested helper binaries — they get SIGKILLed silently. Ship the
-# documented `xattr -dr com.apple.quarantine` step with every macOS artefact.
+# macOS artefacts are Developer ID-signed AND notarised when the RL_MAC_* /
+# RL_NOTARY_PROFILE variables are set (normally via
+# ~/.config/stoatworks/release-signing.env, which rl_init sources) — see the
+# macOS signing section. Unset, bundles fall back to ad-hoc signing: an
+# entirely unsigned bundle produces "is damaged", and approving the outer app
+# does NOT unquarantine nested helper binaries — they get SIGKILLed silently.
+# Only the notarised path removes the quarantine prompt altogether; the ad-hoc
+# fallback still needs the documented `xattr -dr com.apple.quarantine` step.
 #
 # Windows artefacts ARE Authenticode-signed when the RL_SIGN_* variables are
 # set — see the Windows signing section. Unset, they skip rather than fail, so
@@ -44,9 +48,31 @@ RL_PUBLISHER="${RL_PUBLISHER:-Stoatworks Labs}"
 RL_URL="${RL_URL:-https://github.com/stoatworks-labs}"
 RL_SKIPPED=()
 
+# Captured at source time: the vendored copy lives in each repo's scripts/, so
+# this is where per-repo signing extras (mac-entitlements.plist) are looked up.
+RL_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 rl_init() {
   RL_NAME="$1"; RL_SLUG="$2"; RL_VERSION="$3"; RL_IDENT="$4"; RL_OUT="$5"
   mkdir -p "$RL_OUT"
+
+  # Machine-local signing configuration. Deliberately a dotfile and not a
+  # repo file: identity names and the notary profile belong to this Mac, not
+  # to (mostly public) repos, and CI hosts simply lack the file and skip.
+  local cfg="$HOME/.config/stoatworks/release-signing.env"
+  [[ -f "$cfg" ]] && source "$cfg"
+
+  # Tauri signs its own bundles when this is exported, which covers the DMGs
+  # it builds before any rl_* helper ever sees them.
+  if [[ -n "${RL_MAC_SIGN_IDENTITY:-}" && -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+    export APPLE_SIGNING_IDENTITY="$RL_MAC_SIGN_IDENTITY"
+  fi
+
+  # A repo that needs hardened-runtime exceptions drops the file next to the
+  # vendored lib; nothing to wire in the caller.
+  if [[ -z "${RL_MAC_ENTITLEMENTS:-}" && -f "$RL_LIB_DIR/mac-entitlements.plist" ]]; then
+    RL_MAC_ENTITLEMENTS="$RL_LIB_DIR/mac-entitlements.plist"
+  fi
 }
 
 rl_note()  { printf '    %s\n' "$*"; }
@@ -745,6 +771,150 @@ NSI
   rm -rf "$work"
 }
 
+# ---------------------------------- macOS Developer ID sign + notarisation --
+#
+# The real fix for Gatekeeper: sign with a Developer ID Application identity
+# (hardened runtime + secure timestamp, both mandatory for notarisation), then
+# have Apple notarise the artefact and staple the ticket so verification works
+# offline. Configuration (unset means "fall back / skip", never "fail"):
+#
+#   RL_MAC_SIGN_IDENTITY       "Developer ID Application: NAME (TEAMID)"
+#   RL_MAC_INSTALLER_IDENTITY  "Developer ID Installer: NAME (TEAMID)" (.pkg)
+#   RL_NOTARY_PROFILE          notarytool keychain profile name
+#   RL_MAC_ENTITLEMENTS        entitlements plist, auto-detected from the
+#                              vendored scripts/mac-entitlements.plist
+#
+# Normally all four come from ~/.config/stoatworks/release-signing.env via
+# rl_init. The notary profile is created once per machine with
+# `xcrun notarytool store-credentials` — the app-specific password lives in
+# the keychain and never appears in an environment variable.
+
+RL_MAC_SIGNED_COUNT=0
+RL_NOTARIZED_COUNT=0
+
+rl_mac_sign_ready() { [[ -n "${RL_MAC_SIGN_IDENTITY:-}" ]]; }
+rl_notary_ready()   { [[ -n "${RL_NOTARY_PROFILE:-}" ]]; }
+
+# Sign a bundle (or single Mach-O) with the Developer ID identity, inside-out:
+# nested executables, dylibs and frameworks first, the main binary and the
+# bundle itself last, because an outer signature covers the contents as-is.
+# Entitlements are applied ONLY to the outer app and its main executable —
+# helpers must not inherit exceptions they don't need.
+rl_mac_sign() { # rl_mac_sign <path-to-.app-or-binary>
+  local app="$1" f ent=()
+  [[ -e "$app" ]] || return 0
+  [[ -n "${RL_MAC_ENTITLEMENTS:-}" && -f "${RL_MAC_ENTITLEMENTS:-}" ]] \
+    && ent=(--entitlements "$RL_MAC_ENTITLEMENTS")
+  local sign=(codesign --force --options runtime --timestamp \
+              --sign "$RL_MAC_SIGN_IDENTITY")
+  rl_step "sign $(basename "$app") (Developer ID)"
+
+  # Already correctly signed — usually by Tauri, which signs during bundling
+  # when APPLE_SIGNING_IDENTITY is exported. Do NOT re-sign: replacing the
+  # signature changes the CDHash, and any DMG built from the earlier copy
+  # would no longer be covered by this app's notarisation.
+  if codesign --verify --strict --deep "$app" >/dev/null 2>&1 \
+     && codesign -dvv "$app" 2>&1 | grep -q "Authority=$RL_MAC_SIGN_IDENTITY" \
+     && codesign -d --verbose=2 "$app" 2>&1 | grep -q 'flags=.*runtime'; then
+    RL_MAC_SIGNED_COUNT=$((RL_MAC_SIGNED_COUNT + 1))
+    rl_note "already signed with this identity, left untouched"
+    return 0
+  fi
+
+  if [[ -d "$app" ]]; then
+    # Nested code: everything executable or Mach-O shaped that is not the main
+    # binary. file(1) is the arbiter — resources are not re-signed.
+    while IFS= read -r f; do
+      file -b "$f" 2>/dev/null | grep -q 'Mach-O' || continue
+      "${sign[@]}" "$f" >/dev/null 2>&1 \
+        || { echo "codesign failed on nested $f" >&2; return 1; }
+    done < <(find "$app/Contents" -type f \
+               \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) \
+               ! -path "$app/Contents/MacOS/*" 2>/dev/null | sort)
+    find "$app/Contents" -name '*.framework' -maxdepth 3 -type d 2>/dev/null \
+      | while IFS= read -r f; do
+          "${sign[@]}" "$f" >/dev/null 2>&1 \
+            || { echo "codesign failed on framework $f" >&2; exit 1; }
+        done || return 1
+    while IFS= read -r f; do
+      "${sign[@]}" "${ent[@]}" "$f" >/dev/null 2>&1 \
+        || { echo "codesign failed on $f" >&2; return 1; }
+    done < <(find "$app/Contents/MacOS" -type f -perm -u+x 2>/dev/null | sort)
+  fi
+  "${sign[@]}" "${ent[@]}" "$app" >/dev/null 2>&1 \
+    || { echo "codesign failed on $app" >&2; return 1; }
+
+  # Verify rather than trust the exit status — same lesson as rl_sign_file.
+  codesign --verify --strict --deep "$app" 2>&1 | sed 's/^/    /' | head -5
+  codesign --verify --strict --deep "$app" >/dev/null 2>&1 \
+    || { echo "signature did not verify: $app" >&2; return 1; }
+  RL_MAC_SIGNED_COUNT=$((RL_MAC_SIGNED_COUNT + 1))
+  rl_note "signed $(basename "$app")"
+}
+
+# Notarise one artefact and staple the ticket. Apps are shipped to Apple as a
+# temporary zip and the ticket is stapled to the bundle itself, so anything
+# packaged from it afterwards (zip, dmg) carries the ticket. dmg/pkg are
+# submitted and stapled as files. Bare zips can be submitted but never
+# stapled — notarise the app BEFORE zipping instead.
+rl_mac_notarize() { # rl_mac_notarize <path (.app|.dmg|.pkg|.zip)>
+  local target="$1" sub log
+  rl_notary_ready || { rl_skip "notarisation (no RL_NOTARY_PROFILE)"; return 0; }
+  [[ -e "$target" ]] || return 0
+  rl_step "notarize $(basename "$target")"
+
+  sub="$target"
+  if [[ -d "$target" ]]; then
+    sub="$(mktemp -d)/$(basename "$target").zip"
+    ditto -c -k --keepParent "$target" "$sub"
+  fi
+
+  log="$(mktemp)"
+  if ! xcrun notarytool submit "$sub" --keychain-profile "$RL_NOTARY_PROFILE" \
+        --wait >"$log" 2>&1 || ! grep -q 'status: Accepted' "$log"; then
+    echo "notarisation FAILED for $target:" >&2
+    cat "$log" >&2
+    # Surface Apple's per-binary reasons; the submission id is in the log.
+    local id; id=$(grep -m1 '  id:' "$log" | awk '{print $2}')
+    [[ -n "$id" ]] && xcrun notarytool log "$id" \
+        --keychain-profile "$RL_NOTARY_PROFILE" >&2 || true
+    rm -f "$log"; [[ "$sub" != "$target" ]] && rm -rf "$(dirname "$sub")"
+    return 1
+  fi
+  rm -f "$log"; [[ "$sub" != "$target" ]] && rm -rf "$(dirname "$sub")"
+
+  case "$target" in
+    *.zip) rl_note "notarised (zip cannot be stapled; contents carry no ticket)" ;;
+    *)  xcrun stapler staple "$target" >/dev/null \
+          || { echo "stapler failed on $target" >&2; return 1; }
+        rl_note "notarised and stapled" ;;
+  esac
+  RL_NOTARIZED_COUNT=$((RL_NOTARIZED_COUNT + 1))
+
+  # The verdict that matches what a user's Mac will decide.
+  if [[ -d "$target" ]]; then
+    spctl -a -t install "$target" >/dev/null 2>&1 \
+      || { echo "spctl rejected $target after notarisation" >&2; return 1; }
+  fi
+}
+
+# Sign every Mach-O in a staging tree that is not already validly signed by a
+# real identity. Third-party libraries (the NDI runtime is Vizrt-signed) are
+# left untouched; ad-hoc signatures verify but carry no Authority line, so
+# they are re-signed. This is what makes bare CLI payloads notarisable.
+rl_mac_sign_tree() { # rl_mac_sign_tree <dir>
+  rl_mac_sign_ready || return 0
+  local f
+  while IFS= read -r f; do
+    file -b "$f" 2>/dev/null | grep -q 'Mach-O' || continue
+    if codesign --verify --strict "$f" >/dev/null 2>&1 \
+       && codesign -dvv "$f" 2>&1 | grep -q 'Authority='; then
+      continue
+    fi
+    rl_mac_sign "$f" || return 1
+  done < <(find "$1" -type f | sort)
+}
+
 # -------------------------------------------------------- macOS ad-hoc sign --
 #
 # arm64 Mach-O binaries come out of the linker already ad-hoc signed because the
@@ -753,10 +923,19 @@ NSI
 # explicitly and identically. Nested code first, outermost last — a signature
 # over a bundle covers its contents, so re-signing an inner binary afterwards
 # invalidates the outer one.
+#
+# When Developer ID signing is configured this upgrades transparently to the
+# real thing — sign, notarise, staple — so existing callers get the full chain
+# without edits. Ad-hoc remains the unconfigured/CI fallback.
 
 rl_adhoc_sign() { # rl_adhoc_sign <path-to-.app>
   local app="$1" f
   [[ -d "$app" ]] || return 0
+  if rl_mac_sign_ready; then
+    rl_mac_sign "$app" || return 1
+    rl_mac_notarize "$app" || return 1
+    return 0
+  fi
   rl_step "sign $(basename "$app") (ad-hoc)"
   while IFS= read -r f; do
     codesign --force --sign - --timestamp=none "$f" 2>/dev/null || true
@@ -790,6 +969,7 @@ rl_pkg() { # rl_pkg <label> <stagedir> --cli | --app <BundleName>
   else
     install_location="/usr/local/${RL_SLUG}"
     cp -R "$stage/." "$root/"
+    rl_mac_sign_tree "$root" || return 1
     # Link every executable file at the top level into /usr/local/bin.
     {
       echo '#!/bin/sh'
@@ -837,9 +1017,14 @@ DIST
   rm -f "$outfile"
   local pb_args=(--distribution "$work/distribution.xml" --package-path "$work")
   [[ -n "$licref" ]] && pb_args+=(--resources "$work/resources")
+  [[ -n "${RL_MAC_INSTALLER_IDENTITY:-}" ]] \
+    && pb_args+=(--sign "$RL_MAC_INSTALLER_IDENTITY" --timestamp)
   productbuild "${pb_args[@]}" "$outfile" >/dev/null
   rl_note "$(basename "$outfile")"
   rm -rf "$work"
+  # An unsigned pkg cannot be notarised; Apple rejects it at intake.
+  [[ -n "${RL_MAC_INSTALLER_IDENTITY:-}" ]] && { rl_mac_notarize "$outfile" || return 1; }
+  return 0
 }
 
 # ------------------------------------------------- macOS multi-part .pkg ----
@@ -899,9 +1084,14 @@ rl_pkg_multi() { # rl_pkg_multi <label> <src:dest> ...
   } >"$work/distribution.xml"
 
   rm -f "$outfile"
-  productbuild --distribution "$work/distribution.xml" --package-path "$work" "$outfile" >/dev/null
+  local pbm_args=(--distribution "$work/distribution.xml" --package-path "$work")
+  [[ -n "${RL_MAC_INSTALLER_IDENTITY:-}" ]] \
+    && pbm_args+=(--sign "$RL_MAC_INSTALLER_IDENTITY" --timestamp)
+  productbuild "${pbm_args[@]}" "$outfile" >/dev/null
   rl_note "$(basename "$outfile")"
   rm -rf "$work"
+  [[ -n "${RL_MAC_INSTALLER_IDENTITY:-}" ]] && { rl_mac_notarize "$outfile" || return 1; }
+  return 0
 }
 
 # ------------------------------------------------------------- macOS .dmg ---
@@ -914,6 +1104,7 @@ rl_dmg() { # rl_dmg <label> <stagedir> [--app <BundleName>]
   local outfile="$RL_OUT/${RL_SLUG}-${RL_VERSION}-${label}.dmg"
   rl_step "dmg  ${label}"
   rm -f "$outfile"
+  [[ "$mode" != "--app" ]] && { rl_mac_sign_tree "$stage" || return 1; }
 
   if [[ "$mode" == "--app" ]] && command -v create-dmg >/dev/null 2>&1; then
     # create-dmg exits 2 when it cannot set a custom icon position on a
@@ -924,7 +1115,11 @@ rl_dmg() { # rl_dmg <label> <stagedir> [--app <BundleName>]
                --app-drop-link 400 190 \
                --no-internet-enable \
                "$outfile" "$stage" >/dev/null 2>&1 || true
-    if [[ -f "$outfile" ]]; then rl_note "$(basename "$outfile")"; return 0; fi
+    if [[ -f "$outfile" ]]; then
+      rl_note "$(basename "$outfile")"
+      rl_dmg_finish "$outfile" "$mode"
+      return $?
+    fi
     rl_note "create-dmg failed, falling back to hdiutil"
   fi
 
@@ -941,6 +1136,21 @@ rl_dmg() { # rl_dmg <label> <stagedir> [--app <BundleName>]
     rm -f "$hdlog"
     return 1
   fi
+  rl_dmg_finish "$outfile" "$mode"
+}
+
+# Sign the image itself; notarise it only when it carries a bare payload. An
+# --app dmg holds a bundle that rl_adhoc_sign/rl_mac_sign already notarised, so
+# Apple's hash check covers it and a second submission buys nothing. A CLI dmg
+# has no bundle for a ticket to ride on, so the image is the thing to notarise.
+rl_dmg_finish() { # rl_dmg_finish <dmg> <mode>
+  local outfile="$1" mode="${2:-}"
+  rl_mac_sign_ready || return 0
+  codesign --force --timestamp --sign "$RL_MAC_SIGN_IDENTITY" "$outfile" \
+    >/dev/null 2>&1 || { echo "codesign failed on $outfile" >&2; return 1; }
+  if [[ "$mode" != "--app" ]]; then
+    rl_mac_notarize "$outfile" || return 1
+  fi
 }
 
 # --------------------------------------------------- signing status blurb ---
@@ -951,10 +1161,19 @@ rl_dmg() { # rl_dmg <label> <stagedir> [--app <BundleName>]
 # on an unsigned one is worse. Driven by RL_SIGNED_COUNT, which only
 # rl_sign_file increments, so it cannot drift from reality.
 rl_notes_signing() {
-  if (( RL_SIGNED_COUNT > 0 )); then
-    printf '%s' "Windows artefacts are Authenticode-signed and timestamped. macOS artefacts are unsigned: see the README for the quarantine step."
+  local mac win
+  if (( RL_NOTARIZED_COUNT > 0 )); then
+    mac="macOS artefacts are Developer ID-signed and notarised by Apple — no quarantine step needed."
+  elif (( RL_MAC_SIGNED_COUNT > 0 )); then
+    mac="macOS artefacts are Developer ID-signed but NOT notarised: see the README for the quarantine step."
   else
-    printf '%s' "Unsigned: see the README for the macOS quarantine step."
+    mac="macOS artefacts are unsigned: see the README for the quarantine step."
+  fi
+  if (( RL_SIGNED_COUNT > 0 )); then
+    win="Windows artefacts are Authenticode-signed and timestamped."
+    printf '%s %s' "$win" "$mac"
+  else
+    printf '%s' "$mac"
   fi
 }
 
