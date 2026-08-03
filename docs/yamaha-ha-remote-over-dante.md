@@ -418,5 +418,20 @@ packet byte for byte from scratch. That makes the *encoder* verified against
 hardware-accepted bytes. The adapter's socket handling, multicast join and
 state tracking are not verified against anything but a loopback socket.
 
+**The decoder has now been run over the whole capture**, which is the closest
+thing to a hardware test available without the gear:
+
+```bash
+cargo run -p dante-babelbox-preamp-adapter-yamaha --example decode_capture -- \
+  dante-captures/yamaha-ql1-rio3224d2/ql1-rio3224d2-pairing-gain-phantom.control.pcap
+```
+
+It recovers 3 889 blocks — 142 gain updates, 20 phantom updates, 3 461 metering
+frames, 96 read requests — and reproduces the events this document describes
+from the packets alone: the stagebox announcing all 32 inputs at +36.00 dB and
+the console overwriting them with −6.00 dB **60 ms later** (§7), then the gain
+sweeps walking up and back down inputs 1→4 one at a time, and +48 V switching
+on across inputs 1–8. Nothing was told to the tool; it read it off the wire.
+
 **The captures themselves** now live in the private `dante-captures` repo,
 audio-stripped, with per-file provenance. The raw 1.7 GB original is local-only.
