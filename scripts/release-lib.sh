@@ -16,10 +16,14 @@
 #
 #   brew install makensis create-dmg
 #
-# NOTHING HERE IS CODE-SIGNED. Unsigned .pkg and .dmg payloads are quarantined
-# by Gatekeeper on download, and approving the outer app does NOT unquarantine
-# nested helper binaries — they get SIGKILLed silently. Ship the documented
-# `xattr -dr com.apple.quarantine` step with every macOS artefact.
+# macOS artefacts are NOT code-signed. Unsigned .pkg and .dmg payloads are
+# quarantined by Gatekeeper on download, and approving the outer app does NOT
+# unquarantine nested helper binaries — they get SIGKILLed silently. Ship the
+# documented `xattr -dr com.apple.quarantine` step with every macOS artefact.
+#
+# Windows artefacts ARE Authenticode-signed when the RL_SIGN_* variables are
+# set — see the Windows signing section. Unset, they skip rather than fail, so
+# an unconfigured host still cuts a valid (unsigned) release.
 #
 # Usage:
 #   source .../release-lib.sh
@@ -266,6 +270,147 @@ rl_targz() { # rl_targz <label> <stagedir>
   rl_note "$(basename "$f")"
 }
 
+# -------------------------------------------------------- Windows signing ---
+#
+# Authenticode signing via Azure Artifact Signing, driven from the Mac by jsign.
+#
+#   brew install jsign
+#
+# Why jsign and not signtool: since June 2023 the CA/Browser Forum baseline
+# requires every publicly-trusted code-signing key to live on FIPS 140-2 L2
+# hardware, so there is no .pfx to hand to signtool and no key that could sit
+# in a GitHub secret. Artifact Signing keeps the key in Microsoft's HSM and
+# mints a fresh certificate per signature; jsign speaks that protocol over
+# HTTPS and runs anywhere, which is what lets the whole fleet stay on this Mac
+# instead of moving packaging into the Parallels guest.
+#
+# TIMESTAMPING IS NOT OPTIONAL HERE. An Artifact Signing certificate is valid for
+# 72 hours. Without a countersignature from a TSA the signature is judged
+# against wall-clock time, so an unstamped installer verifies fine on the day
+# it is cut and is broken by the weekend — and nothing in the build tells you,
+# because signing itself succeeded. Every path below stamps.
+#
+# Configuration (all required; unset means "skip signing", never "fail"):
+#
+#   RL_SIGN_ENDPOINT   regional endpoint, e.g. https://eus.codesigning.azure.net
+#   RL_SIGN_ACCOUNT    Artifact Signing account name
+#   RL_SIGN_PROFILE    certificate profile name
+#
+# Renamed from "Trusted Signing" in 2026; both names still appear in the wild.
+# ELIGIBILITY: organizations only in the UK/EU; individual developers must be
+# in the US or Canada. A UK sole trader qualifies under neither.
+
+#   AZURE_TENANT_ID    service principal, as for any Azure SDK client
+#   AZURE_CLIENT_ID
+#   AZURE_CLIENT_SECRET
+#
+# Keep the secret in the keychain and wrap invocation the way cf-run does for
+# Cloudflare, rather than exporting it from a dotfile. Store the *client
+# secret* only — never a cached access token: tokens are multi-kilobyte JWTs
+# and `security add-generic-password -w` silently truncates at 128 bytes, so a
+# stored token comes back corrupted with no error. Tokens are cheap; fetch one
+# per release.
+
+RL_SIGN_TSA="${RL_SIGN_TSA:-http://timestamp.acs.microsoft.com}"
+RL_SIGNED_COUNT=0
+
+# Are we configured to sign? Quiet predicate — callers decide how to report.
+rl_sign_ready() {
+  [[ -n "${RL_SIGN_ENDPOINT:-}" && -n "${RL_SIGN_ACCOUNT:-}" && -n "${RL_SIGN_PROFILE:-}" ]] \
+    && command -v jsign >/dev/null 2>&1
+}
+
+# Artifact Signing authenticates with a bearer token for the code-signing
+# resource. jsign will shell out to `az` itself, but only if the Azure CLI is
+# installed and logged in interactively — no use in an unattended release. So
+# mint the token directly from the service principal and cache it for this
+# process: tokens last an hour, a fleet release takes minutes, and re-fetching
+# per file would be dozens of round trips.
+RL_SIGN_TOKEN=""
+rl_sign_token() {
+  if [[ -n "$RL_SIGN_TOKEN" ]]; then printf '%s' "$RL_SIGN_TOKEN"; return 0; fi
+  local resp
+  resp=$(curl -fsS -X POST \
+    "https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token" \
+    -d "client_id=${AZURE_CLIENT_ID}" \
+    -d "client_secret=${AZURE_CLIENT_SECRET}" \
+    -d "scope=https://codesigning.azure.net/.default" \
+    -d "grant_type=client_credentials" 2>/dev/null) || return 1
+  # Avoid a jq dependency; the token is a single flat string field.
+  RL_SIGN_TOKEN=$(sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p' <<<"$resp")
+  [[ -n "$RL_SIGN_TOKEN" ]] || return 1
+  printf '%s' "$RL_SIGN_TOKEN"
+}
+
+# Sign one PE file in place. Returns non-zero on real failure so callers can
+# abort a release rather than publish a half-signed set.
+rl_sign_file() { # rl_sign_file <path-to-exe-or-dll>
+  local f="$1" tok
+  [[ -f "$f" ]] || return 0
+
+  # Already signed? Re-signing appends rather than replaces on some toolchains,
+  # and a doubly-signed binary is a support call nobody enjoys diagnosing.
+  if command -v osslsigncode >/dev/null 2>&1 \
+     && osslsigncode verify "$f" >/dev/null 2>&1; then
+    rl_note "already signed: $(basename "$f")"
+    return 0
+  fi
+
+  tok=$(rl_sign_token) || { echo "could not obtain an Azure token" >&2; return 1; }
+
+  jsign --storetype TRUSTEDSIGNING \
+        --keystore "$RL_SIGN_ENDPOINT" \
+        --storepass "$tok" \
+        --alias "${RL_SIGN_ACCOUNT}/${RL_SIGN_PROFILE}" \
+        --alg SHA-256 \
+        --tsaurl "$RL_SIGN_TSA" \
+        --tsmode RFC3161 \
+        --name "$RL_NAME" \
+        --url "$RL_URL" \
+        "$f" >/dev/null 2>&1 || { echo "jsign failed on $f" >&2; return 1; }
+
+  # Verify rather than trust the exit status. This library already learned that
+  # lesson from makensis, which exits 0 after aborting; and an unstamped or
+  # malformed signature is exactly the failure that stays invisible until a
+  # user reports it weeks later.
+  if command -v osslsigncode >/dev/null 2>&1; then
+    if ! osslsigncode verify "$f" 2>&1 | grep -q 'Signature verification: ok'; then
+      echo "signature did not verify: $f" >&2; return 1
+    fi
+    if ! osslsigncode verify "$f" 2>&1 | grep -qi 'timestamp'; then
+      echo "signed but NOT timestamped (expires in 72h): $f" >&2; return 1
+    fi
+  fi
+
+  RL_SIGNED_COUNT=$((RL_SIGNED_COUNT + 1))
+  rl_note "signed $(basename "$f")"
+}
+
+# Sign every PE file in a staging tree, before it is zipped or packed into an
+# installer. Order matters: payload first, installer last, because the
+# installer's signature covers the compressed payload as-is.
+rl_sign_windows() { # rl_sign_windows <stagedir-or-file> [...]
+  local target
+  if ! rl_sign_ready; then
+    if [[ -n "${RL_SIGN_ENDPOINT:-}" ]] && ! command -v jsign >/dev/null 2>&1; then
+      rl_skip "Windows signing (jsign not installed: brew install jsign)"
+    else
+      rl_skip "Windows signing (not configured)"
+    fi
+    return 0
+  fi
+  rl_step "sign windows"
+  for target in "$@"; do
+    if [[ -d "$target" ]]; then
+      while IFS= read -r f; do
+        rl_sign_file "$f" || return 1
+      done < <(find "$target" -type f \( -name '*.exe' -o -name '*.dll' \) | sort)
+    else
+      rl_sign_file "$target" || return 1
+    fi
+  done
+}
+
 # ------------------------------------------------------------------- NSIS ---
 #
 # Two shapes of Windows installer:
@@ -276,6 +421,109 @@ rl_targz() { # rl_targz <label> <stagedir>
 # list is generated from the staging directory so callers never hand-maintain
 # it. `makensis` on macOS is case-sensitive about the staging paths but writes
 # Windows-style paths into the script, hence the sed dance.
+
+# makensis builds its language tables by transcoding the BOM'd .nlf files.
+# Under LC_CTYPE=C that conversion throws std::bad_alloc and aborts *with a
+# zero exit status*, so force a UTF-8 locale and verify the file was written
+# rather than trusting the return code.
+#
+# Which UTF-8 locale actually *works* varies and cannot be inferred from the
+# name: macOS lists C.UTF-8 but treats it as plain C, which is exactly the case
+# that aborts. So try candidates in order and keep whichever produces a file —
+# the only reliable test, given makensis exits 0 even when it dies.
+rl_makensis() { # rl_makensis <nsi> <expected-output> <logfile>
+  local nsi="$1" outfile="$2" log="$3" loc
+  rm -f "$outfile"
+  for loc in en_US.UTF-8 C.UTF-8 en_GB.UTF-8 UTF-8; do
+    LC_ALL="$loc" LANG="$loc" makensis -V2 "$nsi" >"$log" 2>&1 || true
+    [[ -s "$outfile" ]] && return 0
+  done
+  return 1
+}
+
+# ------------------------------------------- NSIS signed uninstaller (opt-in) --
+#
+# NSIS cannot emit an uninstaller at compile time: Uninstall.exe is produced by
+# the installer *stub at run time*, which means it cannot be signed on this Mac
+# the way every other artefact is. The standard workaround is a two-pass build —
+# compile a throwaway installer whose only job is to call WriteUninstaller, run
+# it on Windows, retrieve the uninstaller it drops, sign that, and `File` it
+# into the real installer instead of generating a fresh one.
+#
+# Running it needs Windows, so this costs a Parallels round-trip and is opt-in
+# via RL_SIGN_UNINSTALLER=1. It is off by default deliberately: Uninstall.exe is
+# written to disk locally rather than downloaded, so it never carries a
+# Mark-of-the-Web and SmartScreen — which only consults reputation for
+# MOTW-tagged files — never looks at it. The whole benefit is that the UAC
+# prompt at uninstall time reads "Stoatworks Labs" instead of a yellow "Unknown
+# publisher". Worth having, not worth blocking a release on.
+#
+# Guest requirement: none beyond a booted VM. The stub is a plain 32-bit x86
+# NSIS installer, which the ARM64 guest runs under emulation happily — unlike
+# Tauri's bundled makensis.exe, it is only unpacking itself.
+
+rl_nsis_uninstaller() { # rl_nsis_uninstaller <work> <unsection-body> -> prints path
+  local work="$1" unsection="$2"
+  local vm="${RL_VM_NAME:-Windows 11}"
+  local staging="$HOME/Projects/.release-vm"
+  local gen="$staging/uninstgen-${RL_SLUG}.exe"
+
+  command -v prlctl >/dev/null 2>&1 || { rl_skip "signed uninstaller (no prlctl)"; return 1; }
+  mkdir -p "$staging"
+
+  # SilentInstall silent so the stub writes the uninstaller and exits without
+  # ever drawing UI — there is nobody in the guest to click Next.
+  cat >"$work/uninstgen.nsi" <<NSI
+Unicode true
+Name "${RL_NAME}"
+OutFile "${gen}"
+InstallDir "\$TEMP\\${RL_SLUG}-uninstgen"
+RequestExecutionLevel user
+SilentInstall silent
+
+VIProductVersion "$(rl_numver)"
+VIAddVersionKey "ProductName"     "${RL_NAME}"
+VIAddVersionKey "CompanyName"     "${RL_PUBLISHER}"
+VIAddVersionKey "FileDescription" "${RL_NAME} uninstaller"
+VIAddVersionKey "FileVersion"     "${RL_VERSION}"
+VIAddVersionKey "ProductVersion"  "${RL_VERSION}"
+VIAddVersionKey "LegalCopyright"  "${RL_PUBLISHER}"
+
+Section "Install"
+  SetOutPath "\$INSTDIR"
+  WriteUninstaller "\$INSTDIR\\Uninstall.exe"
+SectionEnd
+
+${unsection}
+NSI
+
+  rl_makensis "$work/uninstgen.nsi" "$gen" "$work/uninstgen.log" || {
+    rl_skip "signed uninstaller (stub compile failed)"; return 1; }
+
+  # \\psf\Projects is the same share release-windows-vm.sh uses.
+  cat >"$staging/uninstgen.ps1" <<PS1
+\$ErrorActionPreference = 'Continue'
+\$dir = "\$env:TEMP\\${RL_SLUG}-uninstgen"
+if (Test-Path \$dir) { Remove-Item \$dir -Recurse -Force -EA 0 }
+Start-Process -FilePath '\\\\psf\\Projects\\.release-vm\\uninstgen-${RL_SLUG}.exe' -Wait
+if (-not (Test-Path "\$dir\\Uninstall.exe")) { Write-Output 'NO UNINSTALLER'; exit 1 }
+Copy-Item "\$dir\\Uninstall.exe" '\\\\psf\\Projects\\.release-vm\\Uninstall-${RL_SLUG}.exe' -Force
+Write-Output 'OK'
+exit 0
+PS1
+
+  rm -f "$staging/Uninstall-${RL_SLUG}.exe"
+  prlctl exec "$vm" powershell -NoProfile -ExecutionPolicy Bypass \
+    -File "\\\\psf\\Projects\\.release-vm\\uninstgen.ps1" >/dev/null 2>&1 || true
+
+  local un="$staging/Uninstall-${RL_SLUG}.exe"
+  [[ -s "$un" ]] || { rl_skip "signed uninstaller (guest produced nothing)"; return 1; }
+
+  cp "$un" "$work/Uninstall.exe"
+  rm -f "$un" "$gen" "$staging/uninstgen.ps1"
+  rl_sign_file "$work/Uninstall.exe" || return 1
+  printf '%s' "$work/Uninstall.exe"
+}
 
 rl_nsis() { # rl_nsis <label> <stagedir> --cli | --gui <exe>
   # RL_EULA (optional, from rl_eula) adds a licence page. Required when the NDI
@@ -362,6 +610,39 @@ SC
 )
   fi
 
+  # The uninstall section is assembled separately because the signed-uninstaller
+  # two-pass has to compile a stub containing an identical copy of it — the
+  # uninstaller the stub drops is the one that ships, so any divergence would
+  # mean shipping an uninstaller that does not match the installer.
+  local unsection
+  unsection=$(cat <<UNS
+Section "Uninstall"
+  SetRegView 64
+  SetShellVarContext all
+${unshortcuts}
+${uninstall_files}
+  Delete "\$INSTDIR\\Uninstall.exe"
+${uninstall_dirs}
+  RMDir "\$INSTDIR"
+  DeleteRegKey HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${RL_SLUG}"
+  DeleteRegKey HKLM "Software\\${RL_PUBLISHER}\\${RL_NAME}"
+SectionEnd
+UNS
+)
+
+  # Pass one, when enabled: get a signed Uninstall.exe to embed. `File` after
+  # WriteUninstaller overwrites the freshly generated one — WriteUninstaller
+  # itself has to stay, because makensis refuses to compile an Uninstall
+  # section without it.
+  local writeuninst="  WriteUninstaller \"\$INSTDIR\\Uninstall.exe\""
+  if [[ "${RL_SIGN_UNINSTALLER:-0}" == "1" ]] && rl_sign_ready; then
+    local signedun
+    if signedun=$(rl_nsis_uninstaller "$work" "$unsection"); then
+      writeuninst="${writeuninst}
+  File \"/oname=Uninstall.exe\" \"${signedun}\""
+    fi
+  fi
+
   cat >"$nsi" <<NSI
 Unicode true
 !include "MUI2.nsh"
@@ -433,7 +714,7 @@ ${install_lines}
   SetOutPath "\$INSTDIR"
 ${shortcuts}
 ${pathblock}
-  WriteUninstaller "\$INSTDIR\\Uninstall.exe"
+${writeuninst}
   WriteRegStr HKLM "Software\\${RL_PUBLISHER}\\${RL_NAME}" "InstallDir" "\$INSTDIR"
   WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${RL_SLUG}" "DisplayName"     "${RL_NAME}"
   WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${RL_SLUG}" "DisplayVersion"  "${RL_VERSION}"
@@ -442,37 +723,19 @@ ${pathblock}
   WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${RL_SLUG}" "UninstallString" "\$INSTDIR\\Uninstall.exe"
 SectionEnd
 
-Section "Uninstall"
-  SetRegView 64
-  SetShellVarContext all
-${unshortcuts}
-${uninstall_files}
-  Delete "\$INSTDIR\\Uninstall.exe"
-${uninstall_dirs}
-  RMDir "\$INSTDIR"
-  DeleteRegKey HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${RL_SLUG}"
-  DeleteRegKey HKLM "Software\\${RL_PUBLISHER}\\${RL_NAME}"
-SectionEnd
+${unsection}
 NSI
 
-  # makensis builds its language tables by transcoding the BOM'd .nlf files.
-  # Under LC_CTYPE=C that conversion throws std::bad_alloc and aborts *with a
-  # zero exit status*, so force a UTF-8 locale and verify the file was written
-  # rather than trusting the return code.
-  #
-  # Which UTF-8 locale actually *works* varies and cannot be inferred from the
-  # name: macOS lists C.UTF-8 but treats it as plain C, which is exactly the
-  # case that aborts. So try candidates in order and keep whichever produces a
-  # file — the only reliable test, given makensis exits 0 even when it dies.
-  rm -f "$outfile"
-  local loc ok=0
-  for loc in en_US.UTF-8 C.UTF-8 en_GB.UTF-8 UTF-8; do
-    LC_ALL="$loc" LANG="$loc" makensis -V2 "$nsi" >"$work/makensis.log" 2>&1 || true
-    if [[ -s "$outfile" ]]; then ok=1; break; fi
-  done
+  local ok=0
+  rl_makensis "$nsi" "$outfile" "$work/makensis.log" && ok=1
 
   if (( ok )); then
     rl_note "$(basename "$outfile")"
+    # Sign last: the installer's signature covers its compressed payload, so
+    # the staging tree must already have been signed before it was packed.
+    if rl_sign_ready; then
+      rl_sign_file "$outfile" || { rm -rf "$work"; return 1; }
+    fi
   else
     echo "makensis failed for ${label} (tried every UTF-8 locale):" >&2
     tail -30 "$work/makensis.log" >&2
@@ -677,6 +940,21 @@ rl_dmg() { # rl_dmg <label> <stagedir> [--app <BundleName>]
     cat "$hdlog" >&2
     rm -f "$hdlog"
     return 1
+  fi
+}
+
+# --------------------------------------------------- signing status blurb ---
+#
+# The one sentence about signing that goes into GitHub release notes. It has to
+# track what actually happened during *this* run: claiming "unsigned" on a
+# signed installer trains users to click through warnings, and claiming signed
+# on an unsigned one is worse. Driven by RL_SIGNED_COUNT, which only
+# rl_sign_file increments, so it cannot drift from reality.
+rl_notes_signing() {
+  if (( RL_SIGNED_COUNT > 0 )); then
+    printf '%s' "Windows artefacts are Authenticode-signed and timestamped. macOS artefacts are unsigned: see the README for the quarantine step."
+  else
+    printf '%s' "Unsigned: see the README for the macOS quarantine step."
   fi
 }
 
