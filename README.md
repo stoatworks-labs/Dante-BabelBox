@@ -5,9 +5,19 @@
 > against official/community-authoritative vendor protocol specs (see each
 > adapter's module doc comment for its source) — with one clearly-flagged
 > exception, the Lectrosonics mic adapter, whose wire format is an unverified
-> placeholder (see the Radio Mic Telemetry status table). Nothing here has been
-> **validated against real hardware** — only against mock devices in the
-> test suite. Review before use on live gear.
+> placeholder (see the Radio Mic Telemetry status table). No adapter in this
+> workspace has been **validated against real hardware** — only against mock
+> devices in the test suite. Review before use on live gear.
+>
+> **One exception, and it's a big one.** The Yamaha R-series HA protocol has
+> been captured from a real QL1 + Rio3224-D2, decoded, documented, and then
+> **rebuilt from that documentation and transmitted back — the stagebox
+> accepted it and changed its gain.** See
+> [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md).
+> That is a *protocol* proven on hardware, not *code* proven on hardware: the
+> write came from a standalone script, and the Rio adapter is still
+> unimplemented. But anyone building it is now working from a verified wire
+> format rather than a vendor PDF.
 
 Cross-vendor Dante control bridge, currently covering two domains:
 
@@ -384,6 +394,12 @@ scaffold, not a working adapter, until the wire format is confirmed.
 diagrams why this domain has its own trait, both vendors' wire protocols
 sequence-by-sequence, and exactly what ends up in `MicState` per vendor.
 
+[`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md) is a
+different kind of document: a protocol note reverse-engineered from a capture of a
+real QL1 and Rio3224-D2, showing that Yamaha head-amp control is a proprietary
+block tunnelled inside Dante ConMon rather than anything in Audinate's own control
+protocols. It is observation, not validation — see its closing section.
+
 This domain is a different shape from preamp control: telemetry is
 read-heavy (battery, RF level, audio level are monitoring-only; mute is
 the only realistic write), so it has its own `MicAdapter` trait and
@@ -463,7 +479,9 @@ procedure: **[docs/UNSIGNED.md](docs/UNSIGNED.md)**.
 
 ## Roadmap / TODO
 
-- [ ] **Validate against real hardware** — every adapter is currently tested only against mock devices; nothing has been run on live gear.
+- [ ] **Implement the Yamaha R-series adapter** — **ready to build now.** The wire format is captured, decoded and verified on a real Rio3224-D2 in [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md), including a reference implementation that reproduces a packet the stagebox accepted. Gain (int16 centi-dB) and phantom (uint8) map straight onto `PreampState`. This is the most shovel-ready item on the list.
+- [ ] **Map the remaining Yamaha subops** — eight 32-element arrays (`0x0722` subops `10`,`12`,`13`,`15`,`18`–`1b`) that almost certainly include pad, HPF and polarity, but were never observed populated. A ten-minute capture with hardware resolves them; the procedure is written up in the doc.
+- [ ] **Validate the adapters against real hardware** — every adapter is currently tested only against mock devices; no adapter has been run on live gear.
 - [ ] **Migrate the radio-mic domain onto plugins + OCA** — give it a `Router` in the process (it has none today, since it's pure monitoring), so telemetry mapping/web-UI parity comes for free.
 - [ ] **Ship plugin binaries in release CI** — `.github/workflows/release.yml` builds only the two host binaries today; building/packaging all five `crates/plugin-*` `cdylib`s per platform is a real CI expansion, not yet done.
 - [ ] **Preamp device emulation** — make the bridge answer as a native device of a foreign brand so a console's own preamp UI controls it directly (needs packet captures of a real console+device pairing).
@@ -481,6 +499,12 @@ through a mock socket. Several vendors here (preamp: Qu/SQ, CL/QL,
 Rio/Tio) are deliberately left unimplemented because no public spec
 covers the relevant control; closing those gaps needs a real spec or
 packet captures from real hardware, not assumptions.
+
+**Rio/Tio is no longer in that category.** The packet captures exist, the
+protocol is decoded, and a message built from the write-up was accepted by a
+real Rio3224-D2 — see
+[`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md).
+It stays on the TODO list as unimplemented work, not as a blocked unknown.
 
 - **In-process** (lands in this repo) — implement the relevant trait
   (`DeviceAdapter` for preamp control, `MicAdapter` for radio-mic

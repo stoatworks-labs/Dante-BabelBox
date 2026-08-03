@@ -50,8 +50,19 @@ crates/
 
 These are in the README as user-facing warnings and must not be quietly softened:
 
-**Nothing has been validated against real hardware.** Every adapter is tested against mock
-devices in the test suite only.
+**No adapter has been validated against real hardware.** Every adapter is tested against mock
+devices in the test suite only. Say "no adapter has been validated", not "nothing has been
+validated" — the distinction now matters, see below.
+
+**The Yamaha R-series HA protocol *has* been proven on real hardware**, and this is the one
+place the honesty warning got *stronger* rather than weaker. It was captured from a real
+QL1 + Rio3224-D2, decoded, written up as
+[`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md), then rebuilt
+from that document and transmitted — the stagebox accepted it and changed its gain. Keep the
+line sharp when editing: **the protocol is verified, the code is not.** The write came from a
+standalone Python script; `preamp-adapter-yamaha` still only covers DM3 over OSC and has no
+Rio support at all. Anyone implementing Rio HA is working from evidence, not guesswork — that
+is the claim, and it should not be inflated into "the Yamaha adapter works".
 
 **The Lectrosonics mic adapter's wire format is an unverified placeholder.** Every other
 adapter is built against official or community-authoritative vendor protocol specs — and each
