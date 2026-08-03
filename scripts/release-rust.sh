@@ -115,20 +115,58 @@ fi
 
 # ------------------------------------------------------- server binaries ----
 
+# Every bin the workspace produces, not a hand-maintained list.
+rr_bins() {
+  cargo metadata --no-deps --format-version 1 2>/dev/null \
+    | python3 -c "import json,sys
+for p in json.load(sys.stdin)['packages']:
+    for t in p['targets']:
+        if 'bin' in t['kind']: print(t['name'])"
+}
+
 rr_stage() { # rr_stage <stagedir> <target> <ext>
   local stage="$1" target="$2" ext="${3:-}" f d b
   rm -rf "$stage"; mkdir -p "$stage"
-  # Every bin the workspace produces, not a hand-maintained list.
   while IFS= read -r b; do
     [[ -f "target/$target/release/${b}${ext}" ]] && cp "target/$target/release/${b}${ext}" "$stage/"
-  done < <(cargo metadata --no-deps --format-version 1 2>/dev/null \
-           | python3 -c "import json,sys
-for p in json.load(sys.stdin)['packages']:
-    for t in p['targets']:
-        if 'bin' in t['kind']: print(t['name'])")
+  done < <(rr_bins)
   for f in "${RR_EXTRA_FILES[@]}"; do [[ -n "$f" && -f "$f" ]] && cp "$f" "$stage/"; done
   for d in "${RR_EXTRA_DIRS[@]}"; do [[ -n "$d" && -d "$d" ]] && cp -R "$d" "$stage/"; done
   return 0
+}
+
+# Sign mac binaries IN PLACE, straight out of the linker. Every artefact
+# (tar.gz, pkg, dmg) stages a copy of the same bytes, so one notarised hash
+# covers them all; signing per-stage instead would give each copy a different
+# CDHash and only the notarised one would pass Gatekeeper.
+rr_mac_sign_bins() { # rr_mac_sign_bins <target>
+  local target="$1" b
+  rl_mac_sign_ready || return 0
+  while IFS= read -r b; do
+    [[ -f "target/$target/release/$b" ]] \
+      && { rl_mac_sign "target/$target/release/$b" || return 1; }
+  done < <(rr_bins)
+}
+
+# Stage the NDI runtime into a payload, when the project asked for it.
+#
+# Opt in with RR_BUNDLE_NDI=1 in release-local.sh. Off by default, because
+# shipping the runtime is a licence commitment (see release-lib.sh's NDI
+# section and the release checklist): the installer's EULA must carry Vizrt's
+# terms, which rl_eula does, and the bundled version must be kept current,
+# which nothing can do for you.
+#
+# A target whose runtime is not on this host is skipped, not failed — every app
+# in the fleet loads NDI dynamically and degrades to "unavailable, here is the
+# download", so an un-bundled artefact is still a working one.
+rr_ndi() { # rr_ndi <label> <stagedir> [--app <BundleName>]
+  [[ "${RR_BUNDLE_NDI:-}" == "1" ]] || return 0
+  rl_ndi_bundle "$@"
+  # Must follow rl_ndi_bundle: rl_eula only adds the NDI terms once it can see
+  # the runtime was staged. Recomputed each time so the first successful bundle
+  # switches the licence page on for every installer built afterwards.
+  RL_EULA="$(rl_eula "$repo/LICENSE")"
+  export RL_EULA
 }
 
 rr_build_target() { # rr_build_target <label> <target> <builder> <ext>
@@ -140,9 +178,15 @@ rr_build_target() { # rr_build_target <label> <target> <builder> <ext>
     zigbuild) cargo zigbuild --release --target "$target" --bins ;;
     xwin)     cargo xwin build --release --target "$target" --bins ;;
   esac
+  [[ "$target" == *-apple-darwin ]] && { rr_mac_sign_bins "$target" || exit 1; }
   local stage="$out/.stage-$label"
   rr_stage "$stage" "$target" "$ext"
+  rr_ndi "$label" "$stage"
   if [[ "$ext" == ".exe" ]]; then
+    # Sign the payload before it is packed: the .zip ships these binaries
+    # directly, and the installer's own signature covers them already
+    # compressed, so signing after either step is signing too late.
+    rl_sign_windows "$stage"
     rl_zip  "$label" "$stage"
     rl_nsis "$label" "$stage" --cli
   else
@@ -173,10 +217,12 @@ fi
 # There is no .app here — these are console tools — so the .dmg holds the plain
 # payload rather than a bundle.
 rr_stage "$out/.stage-srv-mac" aarch64-apple-darwin
+rr_ndi macos-aarch64 "$out/.stage-srv-mac"
 rl_pkg macos-aarch64-cli "$out/.stage-srv-mac" --cli
 rl_dmg macos-aarch64-cli "$out/.stage-srv-mac"
 rm -rf "$out/.stage-srv-mac"
 rr_stage "$out/.stage-srv-mac-x64" x86_64-apple-darwin
+rr_ndi macos-x86_64 "$out/.stage-srv-mac-x64"
 rl_pkg macos-x86_64-cli "$out/.stage-srv-mac-x64" --cli
 rl_dmg macos-x86_64-cli "$out/.stage-srv-mac-x64"
 rm -rf "$out/.stage-srv-mac-x64"
@@ -217,6 +263,11 @@ if [[ -n "$RR_LAUNCHER" ]]; then
     local stage="$out/.stage-app-$label"
     rm -rf "$stage"; mkdir -p "$stage"
     cp -R "$appdir/$RR_APP_NAME" "$stage/"
+    # Before signing: the bundle is signed inside-out, so anything added
+    # afterwards would be outside the signature.
+    # Labels here are "macos-aarch64-app"; strip the suffix so the target name
+    # matches the documented RL_NDI_DIR_MACOS_AARCH64 form.
+    rr_ndi "${label%-app}" "$stage" --app "$RR_APP_NAME"
     rl_adhoc_sign "$stage/$RR_APP_NAME"
     rl_dmg "$label" "$stage" --app "$RR_APP_NAME"
     rl_pkg "$label" "$stage" --app "$RR_APP_NAME"
@@ -242,6 +293,7 @@ if [[ -n "$RR_LAUNCHER" ]]; then
           rm -rf "$wstage"; mkdir -p "$wstage"
           cp -R "$src"/* "$wstage/"
           for f in "${RR_EXTRA_FILES[@]}"; do [[ -n "$f" && -f "$f" ]] && cp "$f" "$wstage/"; done
+          rl_sign_windows "$wstage"
           rl_zip  "windows-${label}-app" "$wstage"
           rl_nsis "windows-${label}-app" "$wstage" --gui "${product}.exe"
           rm -rf "$wstage"
@@ -264,10 +316,13 @@ fi
 
 rl_summary
 
-if [[ -n "$RR_APP_NAME" ]]; then
+if (( RL_NOTARIZED_COUNT > 0 )); then
+  echo
+  echo "    macOS artefacts are Developer ID-signed and notarised — no quarantine step."
+elif [[ -n "$RR_APP_NAME" ]]; then
   cat <<NOTE
 
-    Nothing here is code-signed. On macOS users must run
+    macOS artefacts are not code-signed. Users must run
       xattr -dr com.apple.quarantine "/Applications/${RR_APP_NAME}"
     after installing — approving the outer app does not unquarantine nested
     helper binaries, and Gatekeeper SIGKILLs those silently.
@@ -275,7 +330,7 @@ NOTE
 else
   cat <<NOTE
 
-    Nothing here is code-signed. These are command-line tools: the .pkg
+    macOS artefacts are not code-signed. These are command-line tools: the .pkg
     installs them under /usr/local/${RR_SLUG} and links them into
     /usr/local/bin. If macOS refuses to run one, clear the quarantine flag:
       xattr -dr com.apple.quarantine /usr/local/${RR_SLUG}
@@ -289,7 +344,7 @@ if (( upload )); then
   git tag -a "$tag" -m "${RR_NAME} ${version}" || true
   git push origin HEAD --tags
   gh release create "$tag" --title "${RR_NAME} ${version}" \
-     --notes "Local build — GitHub Actions minutes are exhausted, so these artefacts were cut on a Mac. Unsigned: see the README for the macOS quarantine step." \
+     --notes "Local build — GitHub Actions minutes are exhausted, so these artefacts were cut on a Mac. $(rl_notes_signing)" \
      "$out"/* \
     || gh release upload "$tag" "$out"/* --clobber
 fi
