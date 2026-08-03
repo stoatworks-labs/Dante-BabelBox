@@ -2,7 +2,7 @@
 //! the receiver telemetry it recovers.
 //!
 //! ```text
-//! cargo run -p dante-babelbox-mic-adapter-shure-acn --example decode_capture -- <capture.pcap>
+//! cargo run -p dante-babelbox-mic-adapter-shure-acn --example decode_acn_capture -- <capture.pcap>
 //! ```
 //!
 //! Captures live in the private `dante-captures` repo. This is the only
@@ -29,7 +29,7 @@ use dante_babelbox_mic_adapter_shure_acn::slp::parse_attr_reply;
 
 fn main() -> ExitCode {
     let Some(path) = env::args().nth(1) else {
-        eprintln!("usage: decode_capture <capture.pcap|.pcapng>");
+        eprintln!("usage: decode_acn_capture <capture.pcap|.pcapng>");
         return ExitCode::FAILURE;
     };
     let bytes = match fs::read(&path) {

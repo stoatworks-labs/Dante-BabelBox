@@ -7,7 +7,7 @@
 //! the same code the adapter runs.
 //!
 //! ```text
-//! cargo run -p dante-babelbox-preamp-adapter-yamaha --example decode_capture -- <capture.pcap>
+//! cargo run -p dante-babelbox-preamp-adapter-yamaha --example decode_mbc_capture -- <capture.pcap>
 //! ```
 //!
 //! Captures live in the private `dante-captures` repo. Pass `--realtime`
@@ -30,7 +30,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let realtime = args.iter().any(|a| a == "--realtime");
     let Some(path) = args.iter().find(|a| !a.starts_with("--")) else {
-        eprintln!("usage: decode_capture <capture.pcap|.pcapng> [--realtime]");
+        eprintln!("usage: decode_mbc_capture <capture.pcap|.pcapng> [--realtime]");
         return ExitCode::FAILURE;
     };
 

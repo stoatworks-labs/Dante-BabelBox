@@ -422,7 +422,7 @@ state tracking are not verified against anything but a loopback socket.
 thing to a hardware test available without the gear:
 
 ```bash
-cargo run -p dante-babelbox-preamp-adapter-yamaha --example decode_capture -- \
+cargo run -p dante-babelbox-preamp-adapter-yamaha --example decode_mbc_capture -- \
   dante-captures/yamaha-ql1-rio3224d2/ql1-rio3224d2-pairing-gain-phantom.control.pcap
 ```
 
