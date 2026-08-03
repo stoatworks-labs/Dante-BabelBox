@@ -29,6 +29,12 @@ Cross-vendor Dante control bridge, currently covering two domains:
    hardware even has a Dante audio option installed (see the "Radio Mic
    Telemetry" sections below for why that doesn't matter here).
 
+[![Dante-BabelBox — two vendor protocols recovered from packet captures](docs/video-thumb.png)](https://www.youtube.com/watch?v=Tx7hntcaOTw)
+
+*56 seconds. Every line of terminal output is the real decoder — the two
+capture-replay tools in this repo, run against real recordings of a Yamaha QL1
+talking to a Rio3224-D2 and a Shure QLXD4 mounted on a console.*
+
 Dante carries audio and basic mDNS-based device discovery, but nothing
 about preamp gain, phantom power, or wireless-mic status — each vendor
 layers its own proprietary control protocol on top of the same network.
