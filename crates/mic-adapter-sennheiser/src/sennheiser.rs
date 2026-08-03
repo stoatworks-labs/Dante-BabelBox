@@ -115,6 +115,7 @@ impl SennheiserAdapter {
 fn empty_state() -> MicState {
     MicState {
         battery_percent: None,
+        battery_bars: None,
         battery_minutes_remaining: None,
         rf_level_dbm: None,
         rf_quality_percent: None,

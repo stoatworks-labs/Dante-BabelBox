@@ -4,10 +4,13 @@
 //! Specifications V1.0.0" - the only Yamaha console line in this project
 //! with a byte/field-level public spec.
 //!
-//! CL/QL/DM7 and Rio/Tio HA control remain **unimplemented, but no longer
-//! unknown** - the wire format has been captured from real hardware and is
-//! documented in `docs/yamaha-ha-remote-over-dante.md`. That document is
-//! the spec to implement against; it is not guesswork.
+//! [`mbc::MbcAdapter`] covers R-series head amps (Rio/Tio) and the QL/CL
+//! consoles that speak to them, via the `MBC` block documented in
+//! `docs/yamaha-ha-remote-over-dante.md`. That wire format was captured
+//! from real hardware and proven by writing gain to a real Rio3224-D2, so
+//! it is not guesswork - but the adapter itself has never been run against
+//! a device. DM7 is still unimplemented: whether it shares any of this is
+//! unconfirmed.
 //!
 //! CORRECTION to what this file previously claimed: R-series HA control is
 //! *not* the legacy AD8HR MIDI protocol. A native QL1 <-> Rio3224-D2
@@ -30,9 +33,15 @@
 //!     Rio3224-D2**.
 //!
 //! Not yet resolved, so don't invent them: `pad`, HPF, polarity and
-//! digital trim each correspond to one of eight 32-element arrays whose
-//! element width and meaning were never observed populated.
+//! digital trim each correspond to one of eight arrays under opcode
+//! `0x0722`. Their element *widths* are now known - the stagebox answered
+//! the console's pairing queries, and §6 of the spec lists the shapes -
+//! but every value observed was a resting default that never moved, so
+//! nothing identifies which array is which. `PreampState::pad` stays
+//! `None` until one of them is seen to change under a known action.
 
 mod dm3;
+pub mod mbc;
 
 pub use dm3::Dm3Adapter;
+pub use mbc::{MbcAdapter, MbcIdentity};
