@@ -64,9 +64,9 @@ flowchart LR
 | Build | Download | Size |
 | --- | --- | --- |
 | Apple Silicon · .dmg disk image (CLI) | [`dante-babelbox-0.1.1-macos-aarch64-cli.dmg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-aarch64-cli.dmg) | 6.9 MB |
-| Intel · .dmg disk image (CLI) | [`dante-babelbox-0.1.1-macos-x86_64-cli.dmg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-x86_64-cli.dmg) | 7.1 MB |
+| Intel · .dmg disk image (CLI) | [`dante-babelbox-0.1.1-macos-x86_64-cli.dmg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-x86_64-cli.dmg) | 7.2 MB |
 | Apple Silicon · .pkg installer (CLI) | [`dante-babelbox-0.1.1-macos-aarch64-cli.pkg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-aarch64-cli.pkg) | 6.2 MB |
-| Intel · .pkg installer (CLI) | [`dante-babelbox-0.1.1-macos-x86_64-cli.pkg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-x86_64-cli.pkg) | 6.4 MB |
+| Intel · .pkg installer (CLI) | [`dante-babelbox-0.1.1-macos-x86_64-cli.pkg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-x86_64-cli.pkg) | 6.5 MB |
 | Apple Silicon · .tar.gz archive | [`dante-babelbox-macos-aarch64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-macos-aarch64.tar.gz) | 4.3 MB |
 | Intel · .tar.gz archive | [`dante-babelbox-macos-x86_64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-macos-x86_64.tar.gz) | 4.4 MB |
 
@@ -100,7 +100,7 @@ flowchart LR
 
 All builds, checksums and release notes: [github.com/stoatworks-labs/Dante-BabelBox/releases](https://github.com/stoatworks-labs/Dante-BabelBox/releases).
 
-These builds are unsigned, so macOS and Windows each warn once on first launch — see [Unsigned builds — Gatekeeper, SmartScreen & Defender Firewall](#unsigned-builds--gatekeeper-smartscreen--defender-firewall) for the one-time fix.
+macOS builds are signed and notarised and open normally. The Windows builds are unsigned, so SmartScreen warns once — see [Windows SmartScreen & Defender Firewall](#windows-smartscreen--defender-firewall) for the one-time click-through.
 
 <!-- downloads:end -->
 
