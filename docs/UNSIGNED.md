@@ -1,70 +1,38 @@
-# Running unsigned Dante-BabelBox builds
+# Running Dante-BabelBox — Gatekeeper, SmartScreen and firewalls
 
-Everything this project releases is built and published unsigned. This page explains
-what each operating system will say, exactly how to get past it, and how to sign the
-artifacts yourself if you'd rather not click through warnings.
+macOS builds are signed and notarised, so they just open. The Windows
+builds are unsigned and SmartScreen will object once. This page covers
+that, the firewall prompts, and how to verify a download.
 
-## Why they're unsigned
+## Why the Windows builds are unsigned
 
-Clearing these warnings for redistribution costs money, not effort:
+macOS signing is covered: this project carries an Apple Developer Program
+membership and a *Developer ID Application* certificate, and every macOS
+artefact is notarised by Apple.
 
-| Platform | What's needed | Cost |
-|---|---|---|
-| macOS | Apple Developer Program + a *Developer ID Application* certificate, plus notarization of every build | $99/year |
-| Windows | An Authenticode code-signing certificate (OV, or EV to skip SmartScreen reputation-building) | ~$200–500/year |
-
-This project carries neither. Nothing is wrong with the downloads — the OS simply has
-no publisher identity to check them against, so it assumes the worst once and then
+Windows is not. An Authenticode certificate (OV, or EV to skip building
+SmartScreen reputation) runs ~$200-500/year, and the certificate authorities
+will only issue one to a registered legal entity — which this project is not.
+Nothing is wrong with the Windows downloads; Windows simply has no publisher
+identity to check them against, so it assumes the worst once and then
 remembers your answer.
 
 > If you'd rather not trust a stranger's binary at all, every release is reproducible
 > from source — see the build instructions in the README.
 
-## macOS — Gatekeeper
+## macOS — nothing to do
 
-macOS quarantines anything downloaded from a browser, then refuses to launch it because
-**"the developer cannot be verified"**. Any one of these clears it:
+Every macOS artefact is Developer ID-signed, notarised by Apple and stapled,
+so it opens on a double-click with no warning and no quarantine step. That
+covers the nested helper binaries inside the bundle too, which is what the
+old right-click-Open workaround never did.
 
-**1. Right-click → Open** (simplest, per-app, once)
-
-Right-click (or Control-click) the app → **Open** → **Open** in the dialog. The plain
-double-click won't offer this — it has to be the context menu.
-
-**2. Clear the quarantine flag** (scriptable, good for deployment)
+To confirm it for yourself:
 
 ```sh
-xattr -dr com.apple.quarantine "/Applications/Dante-BabelBox.app"
+spctl -a -vv -t install "/Applications/<app>.app"
+# accepted / source=Notarized Developer ID
 ```
-
-**3. Approve it after the fact**
-
-Launch it once, let macOS block it, then go to **System Settings → Privacy & Security**
-and click **Open Anyway** next to the message about the blocked app.
-
-### The CLI build
-
-The command-line archive isn't an app bundle, so there's no right-click → Open. Extract
-it, then:
-
-```sh
-xattr -dr com.apple.quarantine ./dante-babelbox
-chmod +x ./dante-babelbox
-./dante-babelbox --help
-```
-
-### `.pkg` installers
-
-A `.pkg` from an unidentified developer is blocked the same way. Right-click → **Open**,
-or clear the flag on the installer itself before running it:
-
-```sh
-xattr -dr com.apple.quarantine ~/Downloads/<file>.pkg
-```
-
-### Apple Silicon and the `.zip` trap
-
-If you copy an app out of a `.zip` with Finder the quarantine flag comes with it. Prefer the
-`.dmg` or `.pkg`, or run the `xattr` command above after copying.
 
 ## Windows — SmartScreen
 
@@ -143,37 +111,6 @@ The `.deb` and `.rpm` packages are unsigned too, so your package manager may obj
 `sudo dpkg -i <file>.deb` or `sudo rpm -i --nosignature <file>.rpm`.
 
 ## Signing it yourself
-
-### macOS — ad-hoc (local machine only)
-
-An ad-hoc signature stops the OS re-prompting on **your own machine**. It is **not**
-notarization and will do nothing for anyone else:
-
-```sh
-codesign --force --deep --sign - "/Applications/Dante-BabelBox.app"
-```
-
-Verify it took:
-
-```sh
-codesign -dv --verbose=4 "/Applications/Dante-BabelBox.app"
-spctl -a -vv "/Applications/Dante-BabelBox.app"   # still reports "rejected" — ad-hoc is not notarization
-```
-
-### macOS — real signing and notarization
-
-With an Apple Developer Program membership and a *Developer ID Application* certificate:
-
-```sh
-codesign --force --deep --options runtime --timestamp \
-  --sign "Developer ID Application: Your Name (TEAMID)" "<artifact>"
-xcrun notarytool submit "<artifact>.zip" --apple-id you@example.com \
-  --team-id TEAMID --password "app-specific-password" --wait
-xcrun stapler staple "<artifact>"
-```
-
-Note the **hardened runtime** (`--options runtime`) — notarization rejects builds without
-it, and a hardened build with an ad-hoc signature won't launch at all.
 
 ### Windows — Authenticode
 
