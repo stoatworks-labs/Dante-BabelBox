@@ -528,3 +528,7 @@ It stays on the TODO list as unimplemented work, not as a blocked unknown.
   for the full contract and a worked reference
   (`crates/plugin-osc-x32`). This is the path for shipping support for a
   device without waiting on (or needing) a PR here.
+
+<!-- attributions:start -->
+This project is built on other people's work — see [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+<!-- attributions:end -->
