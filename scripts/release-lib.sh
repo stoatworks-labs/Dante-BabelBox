@@ -79,6 +79,19 @@ rl_note()  { printf '    %s\n' "$*"; }
 rl_step()  { printf '==> %s\n' "$*"; }
 rl_skip()  { RL_SKIPPED+=("$1"); printf '    skipped: %s\n' "$1"; }
 
+# `producer | grep -q pattern` is a trap in this file, because `set -o pipefail`
+# is on: grep exits at the first match, the producer is killed by SIGPIPE, and
+# the pipeline reports that failure — so a SUCCESSFUL match returns non-zero.
+# It only bites when the producer is still writing when grep leaves, which is
+# why it looks intermittent: `file -b` on one binary is fine, `unzip -l` on a
+# 5,000-entry Electron bundle is not. That silently skipped the payload inside
+# WebLinked's launcher and produced an unsignable release.
+#
+# So: never pipe into grep -q here. Capture first, match against a here-string.
+rl_grep()  { grep -qE -- "$1" <<<"$2"; }   # rl_grep  <ere> <text>
+rl_grepF() { grep -qF -- "$1" <<<"$2"; }   # rl_grepF <literal> <text>
+rl_grepi() { grep -qiE -- "$1" <<<"$2"; }  # rl_grepi <ere, case-insensitive> <text>
+
 # NSIS wants a 4-part numeric version (1.2.3 -> 1.2.3.0) for VIProductVersion.
 rl_numver() {
   local v="${RL_VERSION%%-*}" n
@@ -400,10 +413,11 @@ rl_sign_file() { # rl_sign_file <path-to-exe-or-dll>
   # malformed signature is exactly the failure that stays invisible until a
   # user reports it weeks later.
   if command -v osslsigncode >/dev/null 2>&1; then
-    if ! osslsigncode verify "$f" 2>&1 | grep -q 'Signature verification: ok'; then
+    local vout; vout="$(osslsigncode verify "$f" 2>&1 || true)"
+    if ! rl_grepF 'Signature verification: ok' "$vout"; then
       echo "signature did not verify: $f" >&2; return 1
     fi
-    if ! osslsigncode verify "$f" 2>&1 | grep -qi 'timestamp'; then
+    if ! rl_grepi 'timestamp' "$vout"; then
       echo "signed but NOT timestamped (expires in 72h): $f" >&2; return 1
     fi
   fi
@@ -813,25 +827,39 @@ rl_mac_sign() { # rl_mac_sign <path-to-.app-or-binary>
   # when APPLE_SIGNING_IDENTITY is exported. Do NOT re-sign: replacing the
   # signature changes the CDHash, and any DMG built from the earlier copy
   # would no longer be covered by this app's notarisation.
-  if codesign --verify --strict --deep "$app" >/dev/null 2>&1 \
-     && codesign -dvv "$app" 2>&1 | grep -q "Authority=$RL_MAC_SIGN_IDENTITY" \
-     && codesign -d --verbose=2 "$app" 2>&1 | grep -q 'flags=.*runtime'; then
+  # RL_MAC_FORCE_SIGN=1 bypasses this — for repairing something this identity
+  # previously signed wrongly (a valid signature says nothing about whether
+  # the entitlements inside it are right).
+  local desc; desc="$(codesign -dvv "$app" 2>&1 || true)"
+  if [[ "${RL_MAC_FORCE_SIGN:-0}" != "1" ]] \
+     && codesign --verify --strict --deep "$app" >/dev/null 2>&1 \
+     && rl_grepF "Authority=$RL_MAC_SIGN_IDENTITY" "$desc" \
+     && rl_grep 'flags=.*runtime' "$desc"; then
     RL_MAC_SIGNED_COUNT=$((RL_MAC_SIGNED_COUNT + 1))
     rl_note "already signed with this identity, left untouched"
     return 0
   fi
 
   if [[ -d "$app" ]]; then
-    # Nested code: everything executable or Mach-O shaped that is not the main
-    # binary. file(1) is the arbiter — resources are not re-signed.
+    # Nested .app bundles first (Electron/CEF helper apps), recursively and
+    # WITH the same entitlements: a renderer helper without allow-jit means V8
+    # aborts at launch — the app notarises fine and then crashes on first run,
+    # which is strictly worse than the warning this replaces. The -prune below
+    # keeps the flat passes out of these bundles so this signature survives.
     while IFS= read -r f; do
-      file -b "$f" 2>/dev/null | grep -q 'Mach-O' || continue
+      rl_mac_sign "$f" || return 1
+    done < <(find "$app/Contents" -mindepth 2 -type d -name '*.app' -prune 2>/dev/null | sort)
+    # Nested loose code: everything executable or Mach-O shaped that is not the
+    # main binary. file(1) is the arbiter — resources are not re-signed.
+    while IFS= read -r f; do
+      rl_grep 'Mach-O' "$(file -b "$f" 2>/dev/null || true)" || continue
       "${sign[@]}" "$f" >/dev/null 2>&1 \
         || { echo "codesign failed on nested $f" >&2; return 1; }
-    done < <(find "$app/Contents" -type f \
-               \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) \
-               ! -path "$app/Contents/MacOS/*" 2>/dev/null | sort)
-    find "$app/Contents" -name '*.framework' -maxdepth 3 -type d 2>/dev/null \
+    done < <(find "$app/Contents" -type d -name '*.app' -prune -o -type f \
+               \( -perm -u+x -o -name '*.dylib' -o -name '*.so' -o -name '*.node' \) \
+               ! -path "$app/Contents/MacOS/*" -print 2>/dev/null | sort)
+    find "$app/Contents" -maxdepth 3 -type d -name '*.app' -prune -o \
+         -maxdepth 3 -type d -name '*.framework' -print 2>/dev/null \
       | while IFS= read -r f; do
           "${sign[@]}" "$f" >/dev/null 2>&1 \
             || { echo "codesign failed on framework $f" >&2; exit 1; }
@@ -906,9 +934,9 @@ rl_mac_sign_tree() { # rl_mac_sign_tree <dir>
   rl_mac_sign_ready || return 0
   local f
   while IFS= read -r f; do
-    file -b "$f" 2>/dev/null | grep -q 'Mach-O' || continue
+    rl_grep 'Mach-O' "$(file -b "$f" 2>/dev/null || true)" || continue
     if codesign --verify --strict "$f" >/dev/null 2>&1 \
-       && codesign -dvv "$f" 2>&1 | grep -q 'Authority='; then
+       && rl_grepF 'Authority=' "$(codesign -dvv "$f" 2>&1 || true)"; then
       continue
     fi
     rl_mac_sign "$f" || return 1
