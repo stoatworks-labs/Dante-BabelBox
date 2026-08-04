@@ -430,7 +430,7 @@ rl_sign_file() { # rl_sign_file <path-to-exe-or-dll>
 # installer. Order matters: payload first, installer last, because the
 # installer's signature covers the compressed payload as-is.
 rl_sign_windows() { # rl_sign_windows <stagedir-or-file> [...]
-  local target
+  local target f
   if ! rl_sign_ready; then
     if [[ -n "${RL_SIGN_ENDPOINT:-}" ]] && ! command -v jsign >/dev/null 2>&1; then
       rl_skip "Windows signing (jsign not installed: brew install jsign)"
@@ -804,16 +804,64 @@ NSI
 # the keychain and never appears in an environment variable.
 
 RL_MAC_SIGNED_COUNT=0
+RL_CS_ERR="${TMPDIR:-/tmp}/rl-codesign-err.$$"
 RL_NOTARIZED_COUNT=0
 
 rl_mac_sign_ready() { [[ -n "${RL_MAC_SIGN_IDENTITY:-}" ]]; }
-rl_notary_ready()   { [[ -n "${RL_NOTARY_PROFILE:-}" ]]; }
+
+# Two ways to authenticate to the notary service, preferred order:
+#
+#   1. An App Store Connect API key — RL_NOTARY_KEY (path to the .p8),
+#      RL_NOTARY_KEY_ID, RL_NOTARY_ISSUER. A file on disk, so nothing can
+#      quietly remove it.
+#   2. A notarytool keychain profile — RL_NOTARY_PROFILE.
+#
+# The keychain profile disappeared twice mid-campaign on 2026-08-04 (every call
+# failing "No Keychain password item found for profile"), stalling the fleet
+# both times and needing the app-specific password re-entered by hand. The API
+# key exists to not depend on that item.
+rl_notary_key_ready() {
+  [[ -n "${RL_NOTARY_KEY:-}" && -f "${RL_NOTARY_KEY:-}" \
+     && -n "${RL_NOTARY_KEY_ID:-}" && -n "${RL_NOTARY_ISSUER:-}" ]]
+}
+rl_notary_ready() { rl_notary_key_ready || [[ -n "${RL_NOTARY_PROFILE:-}" ]]; }
+
+# The credential flags for `xcrun notarytool`, as an array.
+rl_notary_args() {
+  if rl_notary_key_ready; then
+    printf '%s\n' --key "$RL_NOTARY_KEY" --key-id "$RL_NOTARY_KEY_ID" \
+                  --issuer "$RL_NOTARY_ISSUER"
+  else
+    printf '%s\n' --keychain-profile "$RL_NOTARY_PROFILE"
+  fi
+}
 
 # Sign a bundle (or single Mach-O) with the Developer ID identity, inside-out:
 # nested executables, dylibs and frameworks first, the main binary and the
 # bundle itself last, because an outer signature covers the contents as-is.
 # Entitlements are applied ONLY to the outer app and its main executable —
 # helpers must not inherit exceptions they don't need.
+# Sign the loose Mach-O files under <root>, without descending into any nested
+# bundle — those are signed as units by the caller, and reaching inside one
+# after it is sealed invalidates it. Used for an app's Contents and, just as
+# importantly, for the inside of a framework version: Electron parks
+# Helpers/chrome_crashpad_handler in there, and codesign validates
+# subcomponents, so signing the version directory fails with "code object is
+# not signed at all" until that binary is signed first.
+rl_mac_sign_loose() { # rl_mac_sign_loose <root> [<path-prefix-to-skip>]
+  local root="$1" skip="${2:-}" f
+  while IFS= read -r f; do
+    [[ -n "$skip" && "$f" == $skip* ]] && continue
+    rl_grep 'Mach-O' "$(file -b "$f" 2>/dev/null || true)" || continue
+    codesign --force --options runtime --timestamp \
+             --sign "$RL_MAC_SIGN_IDENTITY" "$f" 2>"$RL_CS_ERR" >/dev/null \
+      || { echo "codesign failed on nested $f: $(cat "$RL_CS_ERR")" >&2; return 1; }
+  done < <(find "$root" \( -type d \( -name '*.app' -o -name '*.framework' \) \) -prune \
+             -o -type f \
+             \( -perm -u+x -o -name '*.dylib' -o -name '*.so' -o -name '*.node' \) \
+             -print 2>/dev/null | sort)
+}
+
 rl_mac_sign() { # rl_mac_sign <path-to-.app-or-binary>
   local app="$1" f ent=()
   [[ -e "$app" ]] || return 0
@@ -849,27 +897,69 @@ rl_mac_sign() { # rl_mac_sign <path-to-.app-or-binary>
     while IFS= read -r f; do
       rl_mac_sign "$f" || return 1
     done < <(find "$app/Contents" -mindepth 2 -type d -name '*.app' -prune 2>/dev/null | sort)
-    # Nested loose code: everything executable or Mach-O shaped that is not the
-    # main binary. file(1) is the arbiter — resources are not re-signed.
+    # Frameworks are signed as units, never by reaching inside them: codesign
+    # refuses a binary that is part of a bundle ("bundle format unrecognized"),
+    # which is what "Electron Framework.framework/Versions/A/Electron Framework"
+    # is. For a versioned framework the real bundle is the version directory,
+    # so sign each Versions/<V> (skipping the Current symlink) and then the
+    # framework itself. No entitlements — these are libraries, not programs.
     while IFS= read -r f; do
-      rl_grep 'Mach-O' "$(file -b "$f" 2>/dev/null || true)" || continue
-      "${sign[@]}" "$f" >/dev/null 2>&1 \
-        || { echo "codesign failed on nested $f" >&2; return 1; }
-    done < <(find "$app/Contents" -type d -name '*.app' -prune -o -type f \
-               \( -perm -u+x -o -name '*.dylib' -o -name '*.so' -o -name '*.node' \) \
-               ! -path "$app/Contents/MacOS/*" -print 2>/dev/null | sort)
-    find "$app/Contents" -maxdepth 3 -type d -name '*.app' -prune -o \
-         -maxdepth 3 -type d -name '*.framework' -print 2>/dev/null \
-      | while IFS= read -r f; do
-          "${sign[@]}" "$f" >/dev/null 2>&1 \
-            || { echo "codesign failed on framework $f" >&2; exit 1; }
-        done || return 1
-    while IFS= read -r f; do
-      "${sign[@]}" "${ent[@]}" "$f" >/dev/null 2>&1 \
-        || { echo "codesign failed on $f" >&2; return 1; }
-    done < <(find "$app/Contents/MacOS" -type f -perm -u+x 2>/dev/null | sort)
+      # A framework's main binary is covered by signing the bundle, and
+      # signing it directly fails the same way its version directory does.
+      local v inner signed_version=0 fwmain
+      fwmain="$(basename "$f")"; fwmain="${fwmain%.framework}"
+      if [[ -d "$f/Versions" ]]; then
+        while IFS= read -r v; do
+          [[ -L "$v" ]] && continue          # Versions/Current, normally a symlink
+          # ...but a zip built without -y stores it as an EMPTY REAL DIRECTORY
+          # instead (resolve-configurator's Python.framework ships that way).
+          # codesign rejects an empty directory as "bundle format unrecognized",
+          # and there is nothing in it to sign anyway.
+          [[ -z "$(ls -A "$v" 2>/dev/null)" ]] && continue
+          # Inside-out within the version: nested bundles, then loose code,
+          # then the version directory itself.
+          while IFS= read -r inner; do
+            rl_mac_sign "$inner" || return 1
+          done < <(find "$v" -mindepth 1 -type d \
+                     \( -name '*.app' -o -name '*.framework' \) -prune 2>/dev/null | sort)
+          rl_mac_sign_loose "$v" "$v/$fwmain" || return 1
+          "${sign[@]}" "$v" 2>"$RL_CS_ERR" >/dev/null \
+            || { echo "codesign failed on framework version $v: $(cat "$RL_CS_ERR")" >&2; return 1; }
+          signed_version=1
+        done < <(find "$f/Versions" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+      fi
+      if (( ! signed_version )); then
+        # PyInstaller ships a stripped-down Python.framework under
+        # Contents/Resources with no Versions/ and no Info.plist. It is a
+        # directory that merely ends in .framework, and codesign rightly calls
+        # it "bundle format unrecognized". Signing the Mach-O files inside it is
+        # both possible and sufficient — that is what the notary checks — so
+        # only attempt the bundle signature when it really is a bundle.
+        rl_mac_sign_loose "$f" || return 1
+        if [[ -f "$f/Resources/Info.plist" || -f "$f/Info.plist" ]]; then
+          "${sign[@]}" "$f" 2>"$RL_CS_ERR" >/dev/null \
+            || { echo "codesign failed on framework $f: $(cat "$RL_CS_ERR")" >&2; return 1; }
+        else
+          rl_note "not a real bundle, signed its contents: $(basename "$f")"
+        fi
+      fi
+    done < <(find "$app/Contents" -type d -name '*.app' -prune -o \
+               -type d -name '*.framework' -print 2>/dev/null | sort)
+
+    # Everything else Mach-O shaped that is not the main binary. Bundles are
+    # pruned — re-signing their contents now would break the seals just made.
+    rl_mac_sign_loose "$app/Contents" "$app/Contents/MacOS/" || return 1
+    # Contents/MacOS is deliberately NOT signed file-by-file. The bundle
+    # signature below already covers everything in it, and signing the main
+    # executable on its own makes codesign validate the whole enclosing bundle
+    # early — which fails on a PyInstaller app, where Contents/Frameworks holds
+    # base_library.zip and codesign treats that as unsigned nested code.
   fi
-  "${sign[@]}" "${ent[@]}" "$app" >/dev/null 2>&1 \
+  # ${a[@]+"${a[@]}"}: bash 3.2 — still /bin/bash on macOS, and what launchd
+  # runs — treats "${a[@]}" on an EMPTY array as an unbound variable under
+  # set -u and dies. That is why the auto-signer failed on a host where every
+  # interactive run had worked: this shell had bash 5 first on PATH.
+  "${sign[@]}" ${ent[@]+"${ent[@]}"} "$app" >/dev/null 2>&1 \
     || { echo "codesign failed on $app" >&2; return 1; }
 
   # Verify rather than trust the exit status — same lesson as rl_sign_file.
@@ -897,15 +987,43 @@ rl_mac_notarize() { # rl_mac_notarize <path (.app|.dmg|.pkg|.zip)>
     ditto -c -k --keepParent "$target" "$sub"
   fi
 
+  # `local` on the loop variable is load-bearing: without it this clobbers a
+  # caller's `$a`, and posthoc-sign.sh iterates its assets in exactly that
+  # variable — the asset name came back empty and the re-upload tried to POST
+  # the working directory.
+  local -a cred=(); local cred_line
+  while IFS= read -r cred_line; do cred+=("$cred_line"); done < <(rl_notary_args)
   log="$(mktemp)"
-  if ! xcrun notarytool submit "$sub" --keychain-profile "$RL_NOTARY_PROFILE" \
-        --wait >"$log" 2>&1 || ! grep -q 'status: Accepted' "$log"; then
+
+  # The keychain profile lookup fails intermittently — "No Keychain password
+  # item found for profile" — and then succeeds again later with nothing
+  # changed. It stalled the 2026-08-04 fleet run twice and looked like the
+  # credential had been deleted. It is transient, so retry it rather than
+  # abandoning a release that is otherwise ready. An API key (RL_NOTARY_KEY)
+  # avoids the lookup entirely and is preferred where one is configured.
+  # Transient failures worth retrying rather than failing a release over:
+  #   * the keychain lookup flaking (see above)
+  #   * Apple's notary service timing out — on 2026-08-04 it went unreachable
+  #     mid-run and took out 18 repos in a couple of minutes, each failing
+  #     instantly on NSURLErrorDomain -1001 rather than on anything we did.
+  # A rejection by Apple is NOT transient and must not be retried: it means the
+  # artefact is wrong, and retrying only hides it.
+  local attempt out
+  for attempt in 1 2 3 4; do
+    xcrun notarytool submit "$sub" "${cred[@]}" --wait >"$log" 2>&1 || true
+    out="$(cat "$log")"
+    rl_grep 'No Keychain password item found|The request timed out|Could not connect|NSURLErrorDomain|HTTPError' \
+            "$out" || break
+    rl_note "transient notary failure, retry $attempt of 4"
+    sleep $(( attempt * 30 ))
+  done
+
+  if ! rl_grepF 'status: Accepted' "$(cat "$log")"; then
     echo "notarisation FAILED for $target:" >&2
     cat "$log" >&2
     # Surface Apple's per-binary reasons; the submission id is in the log.
     local id; id=$(grep -m1 '  id:' "$log" | awk '{print $2}')
-    [[ -n "$id" ]] && xcrun notarytool log "$id" \
-        --keychain-profile "$RL_NOTARY_PROFILE" >&2 || true
+    [[ -n "$id" ]] && xcrun notarytool log "$id" "${cred[@]}" >&2 || true
     rm -f "$log"; [[ "$sub" != "$target" ]] && rm -rf "$(dirname "$sub")"
     return 1
   fi
@@ -982,7 +1100,7 @@ rl_adhoc_sign() { # rl_adhoc_sign <path-to-.app>
 #   --app "Foo.app"    the bundle is installed into /Applications
 
 rl_pkg() { # rl_pkg <label> <stagedir> --cli | --app <BundleName>
-  local label="$1" stage="$2" mode="$3" appname="${4:-}"
+  local label="$1" stage="$2" mode="$3" appname="${4:-}" b
   rl_step "pkg  ${label}"
   local work root scripts component outfile
   work="$(mktemp -d)"; root="$work/root"; scripts="$work/scripts"
