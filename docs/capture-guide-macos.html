@@ -476,6 +476,29 @@
     .step-num { width: 30px; height: 30px; font-size: 0.9rem; }
   }
 
+  /* ---------- Sub-headings within a section ---------- */
+  h3.sub {
+    font-weight: 600;
+    font-size: 1.5rem;
+    margin: 48px 0 10px;
+  }
+  h3.sub + p { margin-top: 0; color: var(--ink-soft); }
+  h3.sub.tight { font-size: 1.24rem; margin-top: 38px; }
+
+  /* ---------- Reason list ---------- */
+  .why { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 14px; }
+  .why li {
+    padding: 14px 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--line-strong);
+    border-radius: 4px;
+    color: var(--ink-soft);
+    font-size: 0.95rem;
+  }
+  .why li.only { border-left-color: var(--accent); }
+  .why li b { color: var(--ink); font-weight: 600; }
+
   /* ---------- Print ---------- */
   @media print {
     :root {
@@ -491,9 +514,10 @@
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { background: #FFFFFF; }
     .page { max-width: none; padding: 0; }
-    .diagram-frame, .callout, .kit-card, .alt-card, .term, .qa-row {
+    .diagram-frame, .callout, .kit-card, .alt-card, .term, .qa-row, .why li {
       break-inside: avoid;
     }
+    h3.sub { break-after: avoid; }
     section { break-before: auto; }
     .chain::before { background: repeating-linear-gradient(var(--line-strong) 0 6px, transparent 6px 11px); }
   }
@@ -664,7 +688,7 @@
       </div>
       <div class="kit-card optional">
         <svg class="icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="16" width="40" height="16" rx="2"/><circle cx="12" cy="24" r="2" fill="currentColor" stroke="none"/><circle cx="20" cy="24" r="2" fill="currentColor" stroke="none"/><circle cx="28" cy="24" r="2" fill="currentColor" stroke="none"/><circle cx="36" cy="24" r="2" fill="currentColor" stroke="none"/><path d="M24 16 V6" stroke-dasharray="2 2"/></svg>
-        <div><h4>A mirroring switch or tap</h4><p>Only if you already own one &mdash; see the alternatives near the end. Not required.</p><span class="req-tag">Optional</span></div>
+        <div><h4>A mirroring switch</h4><p>Not needed for the method above &mdash; but there's now a ~&pound;25 switch that does it, and one situation where mirroring is the <em>only</em> way. See &sect;3.</p><span class="req-tag">Optional</span></div>
       </div>
     </div>
   </section>
@@ -861,9 +885,143 @@
   <section>
     <div class="section-head">
       <span class="section-num">&sect;3</span>
-      <h2 class="section-title">Already own a mirroring switch or a tap?</h2>
+      <h2 class="section-title">Mirroring a port instead</h2>
     </div>
-    <p class="section-dek">Neither is necessary &mdash; the laptop-bridge method above works fine on its own &mdash; but if you already have one of these, it's a perfectly good alternative to bridging.</p>
+    <p class="section-dek">You don't need any of this &mdash; the laptop-bridge method above works fine on its own, and it is still the fastest way to get us a capture. But there are two situations where mirroring a switch port is the nicer answer, and one where it is the only one.</p>
+
+    <ul class="why">
+      <li><b>The gear won't tolerate a laptop in the path.</b> Re-cabling means the stagebox vanishes for a few seconds, and not every desk takes that gracefully.</li>
+      <li><b>You'd rather not touch the audio path at all.</b> A mirror is passive: desk and stagebox stay plugged in exactly where they were, and nothing you do can interrupt them.</li>
+      <li class="only"><b>One box is talking privately to another.</b> A wireless receiver mounted on a console unicasts its telemetry straight to that console &mdash; an ordinary switch port sees none of it, and there may be no cable to insert yourself into. Mirroring is the only way to see that traffic at all.</li>
+    </ul>
+
+    <h3 class="sub">The cheap route: a UniFi USW-Flex-Mini</h3>
+    <p>Owning a mirroring switch used to mean borrowing something from IT. It doesn't any more. The <b>UniFi USW-Flex-Mini</b> is a palm-sized five-port gigabit switch for about &pound;25 / $30, and port mirroring is a listed feature &mdash; <em>&ldquo;operation mode (switching or mirroring) per port&rdquo;</em>, straight off Ubiquiti's own datasheet.</p>
+
+    <div class="callout warn" style="margin-top:26px;">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3 L22 20 H2 Z"/><line x1="12" y1="10" x2="12" y2="14"/><circle cx="12" cy="17" r="0.6" fill="currentColor"/></svg>
+      <div>
+        <h3>The catch &mdash; read this before you buy one</h3>
+        <p>The Flex Mini has <b>no web interface of its own.</b> It has to be adopted by a UniFi Network controller before you can configure anything: a Dream Machine, a Cloud Key, or the free UniFi Network Application running on a Mac, PC, Raspberry Pi or in Docker. If you already run UniFi anywhere, you are two minutes from a mirror port. If you don't, standing a controller up is a bigger job than bridging your laptop &mdash; use the method above instead.</p>
+      </div>
+    </div>
+
+    <div class="diagram-frame">
+      <div class="frame-label"><span>Diagram &mdash; <b>five ports, one of them a copy</b></span><span>USW-Flex-Mini</span></div>
+      <div class="diagram-svg-wrap">
+        <svg viewBox="0 0 700 344" xmlns="http://www.w3.org/2000/svg">
+
+          <!-- the two devices, above their ports -->
+          <rect x="213" y="30" width="90" height="42" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+          <text x="258" y="56" text-anchor="middle" class="lbl-mono">Desk</text>
+          <rect x="305" y="30" width="90" height="42" rx="4" fill="var(--surface)" stroke="var(--line-strong)"/>
+          <text x="350" y="56" text-anchor="middle" class="lbl-mono">Stagebox</text>
+
+          <line x1="258" y1="72" x2="258" y2="130" stroke="var(--ink-faint)" stroke-width="2"/>
+          <line x1="350" y1="72" x2="350" y2="130" stroke="var(--ink-faint)" stroke-width="2"/>
+
+          <!-- the switch -->
+          <rect x="100" y="130" width="500" height="110" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)" stroke-width="1.6"/>
+
+          <!-- the internal copy, port 2 to port 4 -->
+          <path d="M258,195 L258,168 L442,168 L442,195" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrow-accent-mirror)"/>
+          <text x="350" y="161" text-anchor="middle" class="lbl-sm" style="fill:var(--accent-ink); font-weight:600">copy of port 2 &mdash; both directions</text>
+
+          <!-- five ports -->
+          <rect x="131" y="195" width="70" height="30" rx="3" fill="var(--surface)" stroke="var(--line-strong)"/>
+          <text x="166" y="215" text-anchor="middle" class="lbl-mono">1</text>
+          <rect x="223" y="195" width="70" height="30" rx="3" fill="var(--surface)" stroke="var(--trace)" stroke-width="2"/>
+          <text x="258" y="215" text-anchor="middle" class="lbl-mono" style="fill:var(--trace); font-weight:700">2</text>
+          <rect x="315" y="195" width="70" height="30" rx="3" fill="var(--surface)" stroke="var(--line-strong)"/>
+          <text x="350" y="215" text-anchor="middle" class="lbl-mono">3</text>
+          <rect x="407" y="195" width="70" height="30" rx="3" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+          <text x="442" y="215" text-anchor="middle" class="lbl-mono" style="fill:var(--accent-ink); font-weight:700">4</text>
+          <rect x="499" y="195" width="70" height="30" rx="3" fill="var(--surface)" stroke="var(--line-strong)"/>
+          <text x="534" y="215" text-anchor="middle" class="lbl-mono">5</text>
+
+          <!-- port roles -->
+          <text x="166" y="258" text-anchor="middle" class="lbl-sm">PoE in</text>
+          <text x="258" y="258" text-anchor="middle" class="lbl-sm" style="fill:var(--trace); font-weight:600">mirrored</text>
+          <text x="350" y="258" text-anchor="middle" class="lbl-sm">stagebox</text>
+          <text x="534" y="258" text-anchor="middle" class="lbl-sm">spare</text>
+
+          <!-- the laptop, below its port -->
+          <line x1="442" y1="225" x2="442" y2="272" stroke="var(--accent)" stroke-width="2"/>
+          <rect x="397" y="272" width="90" height="42" rx="4" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.6"/>
+          <text x="442" y="298" text-anchor="middle" class="lbl-mono" style="fill:var(--accent-ink)">Laptop</text>
+          <text x="442" y="332" text-anchor="middle" class="tag">CAPTURE HERE</text>
+
+          <defs>
+            <marker id="arrow-accent-mirror" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+      <p class="caption">Power it over USB-C and all five ports stay free for gear; port 1 is the only one that takes PoE in, so over PoE it is already spoken for.</p>
+    </div>
+
+    <div class="chain" style="margin-top:34px;">
+
+      <div class="step">
+        <div class="step-marker"><div class="step-num">1</div></div>
+        <div class="step-body">
+          <h3>Wire it up</h3>
+          <p>Desk into <b>port 2</b>, stagebox into <b>port 3</b>, your laptop into <b>port 4</b> &mdash; that last one is the capture port.</p>
+          <p>Leave your laptop on <b>Wi-Fi</b> for talking to the controller, and use its Ethernet port purely for capture. The note after step 4 explains why that isn't optional.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-marker"><div class="step-num">2</div></div>
+        <div class="step-body">
+          <h3>Turn port 4 into a mirror</h3>
+          <p>In UniFi Network: <span class="kbd">Devices</span> &rarr; click the Flex Mini &rarr; <span class="kbd">Ports</span> &rarr; click <b>port 4</b>, the one your laptop is on &rarr; <span class="kbd">Edit</span>.</p>
+          <p>Set <span class="kbd">Operation</span> to <b>Mirroring</b>, set <span class="kbd">Mirroring Port</span> to <b>2</b> &mdash; the desk's port &mdash; then <span class="kbd">Apply Changes</span> and give the switch a few seconds to provision.</p>
+          <div class="step-note">You are always editing the port the copy comes <b>out of</b>, and then naming the port being <b>copied</b>. Newer UniFi Network versions wrap this in a port profile and move things around, but it is the same two questions in the same order.</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-marker"><div class="step-num">3</div></div>
+        <div class="step-body">
+          <h3>Mirror the desk &mdash; and one port really is enough</h3>
+          <p>UniFi's mirroring is strictly <b>one source port to one destination</b>. There is no &ldquo;mirror everything onto port 4&rdquo; here, and no CLI to sneak around it &mdash; the Flex Mini doesn't even offer SSH.</p>
+          <p>That turns out not to matter for this job. Mirroring a port copies traffic in <b>both directions</b>, so mirroring port 2 gives you everything the desk sends <em>and</em> everything the stagebox sends back to it. That is the entire conversation, from one port. You would only want more if a third device were joining in.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-marker"><div class="step-num">4</div></div>
+        <div class="step-body">
+          <h3>Capture</h3>
+          <p>Start Wireshark on your laptop's ordinary Ethernet interface. There is no bridge to make here &mdash; no <span class="mono">bridge0</span> to create, and nothing to delete afterwards.</p>
+          <p>Then follow <b>steps 4 to 9</b> of &sect;2 exactly as written: start the capture first, power everything on, pair them, wiggle a few things, stop, save, and send the file over. Only the tidy-up half of step 9 changes &mdash; set the port back to <span class="kbd">Switching</span> rather than deleting a bridge. A port left in mirroring mode looks simply broken to whoever plugs into it next.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <h3 class="sub tight">Two things to expect while it is running</h3>
+
+    <div class="alt-grid">
+      <div class="alt-card">
+        <div class="alt-body">
+          <h4>Your laptop's Ethernet port goes deaf</h4>
+          <p>A mirror destination only spits copies out &mdash; it won't carry a working network connection. Your laptop can't reach the controller, or the internet, through that port while mirroring is on. That is correct behaviour, not a fault, and it is why the controller needs to be reachable over Wi-Fi instead.</p>
+          <div class="verdict">Expected &mdash; not a fault</div>
+        </div>
+      </div>
+      <div class="alt-card">
+        <div class="alt-body">
+          <h4>The file gets big, fast</h4>
+          <p>If Dante <em>audio</em> is flowing through port 2, you are copying every one of those streams too &mdash; tens of megabytes per second. Before you start, in Wireshark: <span class="kbd">Capture &rarr; Options &rarr; Output</span>, tick <b>Create a new file automatically</b> every <b>100 MB</b>, and tick <b>Use a ring buffer with 20 files</b>. You finish with the most recent 2 GB instead of a full disk.</p>
+          <div class="verdict">Set the ring buffer before you start</div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="sub">The other two options</h3>
 
     <div class="diagram-frame wide">
       <div class="frame-label"><span>Diagram &mdash; <b>three ways to see the same traffic</b></span><span>&mdash;</span></div>
@@ -889,17 +1047,17 @@
 
           <!-- Panel 2: mirror switch -->
           <g transform="translate(350,10)">
-            <rect x="0" y="0" width="300" height="230" rx="6" fill="none" stroke="var(--line-strong)" stroke-width="1.5"/>
-            <text x="150" y="26" text-anchor="middle" class="tag" style="fill:var(--ink-faint)">IF YOU OWN ONE</text>
+            <rect x="0" y="0" width="300" height="230" rx="6" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+            <text x="150" y="26" text-anchor="middle" class="tag">ABOUT &pound;25</text>
             <rect x="20" y="60" width="52" height="36" rx="3" fill="var(--surface)" stroke="var(--line-strong)"/>
             <text x="46" y="82" text-anchor="middle" class="lbl-mono">Desk</text>
-            <rect x="124" y="60" width="52" height="36" rx="3" fill="var(--surface)" stroke="var(--line-strong)"/>
+            <rect x="124" y="60" width="52" height="36" rx="3" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.6"/>
             <text x="150" y="82" text-anchor="middle" class="lbl-mono">Switch</text>
             <rect x="228" y="60" width="52" height="36" rx="3" fill="var(--surface)" stroke="var(--line-strong)"/>
             <text x="254" y="82" text-anchor="middle" class="lbl-mono">Stage</text>
             <line x1="72" y1="78" x2="124" y2="78" stroke="var(--ink-faint)" stroke-width="2" marker-end="url(#arrow-faint)"/>
             <line x1="176" y1="78" x2="228" y2="78" stroke="var(--ink-faint)" stroke-width="2" marker-end="url(#arrow-faint)"/>
-            <line x1="150" y1="96" x2="150" y2="150" stroke="var(--ink-faint)" stroke-width="2" stroke-dasharray="3 3" marker-end="url(#arrow-faint)"/>
+            <line x1="150" y1="96" x2="150" y2="150" stroke="var(--accent)" stroke-width="2" stroke-dasharray="3 3" marker-end="url(#arrow-faint)"/>
             <rect x="124" y="150" width="52" height="36" rx="3" fill="var(--surface)" stroke="var(--line-strong)"/>
             <text x="150" y="172" text-anchor="middle" class="lbl-mono">Laptop</text>
             <text x="150" y="212" text-anchor="middle" class="lbl-sm">mirror port copies traffic</text>
@@ -929,8 +1087,8 @@
     <div class="alt-grid">
       <div class="alt-card">
         <div class="alt-body">
-          <h4>Managed switch with a mirror / SPAN port</h4>
-          <p>Plug the desk, stagebox, and your laptop into the switch as normal, then configure one port to mirror the desk and stagebox's traffic onto your laptop's port. Capture directly on that single NIC &mdash; no bridging needed.</p>
+          <h4>A managed switch you already own</h4>
+          <p>Any switch with a mirror / SPAN port does the same job as the Flex Mini above, and most of them will mirror several source ports at once rather than just one. The menus differ per vendor; the two questions don't.</p>
           <div class="verdict">Needs admin access to the switch</div>
         </div>
       </div>
@@ -967,6 +1125,14 @@
       <div class="qa-row">
         <div class="q">The desk and stagebox won't find each other through the laptop</div>
         <div class="a">Check <span class="kbd">System Settings &rarr; Network &rarr; Firewall</span> isn't blocking the multicast traffic discovery relies on, and try turning Wi-Fi off entirely so it can't interfere.</div>
+      </div>
+      <div class="qa-row">
+        <div class="q">There's no "Mirroring" option on the switch's ports</div>
+        <div class="a">The switch is either not adopted yet, or running old firmware &mdash; check for a firmware update in UniFi Network and let it apply, then look again. If it still isn't there, fall back to the laptop-bridge method in &sect;2.</div>
+      </div>
+      <div class="qa-row">
+        <div class="q">The mirror port is set up but Wireshark sees nothing</div>
+        <div class="a">Check you edited the <em>laptop's</em> port and pointed it at the <em>desk's</em> port, and not the other way round &mdash; it is an easy one to get backwards, and backwards produces exactly this. Also check the laptop's Ethernet interface is up at all: some NICs report no link worth capturing on when nothing is being sent back to them.</div>
       </div>
     </div>
 
