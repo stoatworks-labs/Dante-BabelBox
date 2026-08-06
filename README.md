@@ -146,6 +146,13 @@ inline bridge:
 - [macOS](docs/capture-guide-macos.md) ([PDF](docs/capture-guide-macos.pdf), [HTML](docs/capture-guide-macos.html))
 - [Linux](docs/capture-guide-linux.md) ([PDF](docs/capture-guide-linux.pdf), [HTML](docs/capture-guide-linux.html))
 
+[![Send us a capture — the packets two open-source audio tools are waiting on](docs/video-capture-callout-thumb.png)](https://www.youtube.com/watch?v=E-gjYZoHVAw)
+
+*57 seconds, covering this project and [RFutils](https://github.com/stoatworks-labs/RFutils)
+together. The Wireshark section is the real QL1/Rio recording the Yamaha decoder
+was built from — 4052 packets of Audinate ConMon that Wireshark renders as
+`Data`, because nothing knew what they were.*
+
 Each guide also carries a step-by-step recipe for the other route — putting a
 port on a **UniFi USW-Flex-Mini** into mirroring mode, which is a ~£25 switch
 rather than the borrowed-from-IT hardware a mirror port used to mean. That
