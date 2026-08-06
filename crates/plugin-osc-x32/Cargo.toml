@@ -17,4 +17,4 @@ abi_stable.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-rosc = "0.10"
+rosc = "0.11"
