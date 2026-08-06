@@ -146,6 +146,14 @@ inline bridge:
 - [macOS](docs/capture-guide-macos.md) ([PDF](docs/capture-guide-macos.pdf), [HTML](docs/capture-guide-macos.html))
 - [Linux](docs/capture-guide-linux.md) ([PDF](docs/capture-guide-linux.pdf), [HTML](docs/capture-guide-linux.html))
 
+Each guide also carries a step-by-step recipe for the other route — putting a
+port on a **UniFi USW-Flex-Mini** into mirroring mode, which is a ~£25 switch
+rather than the borrowed-from-IT hardware a mirror port used to mean. That
+matters beyond convenience: a receiver mounted on a console *unicasts* its
+telemetry to that console, so an ordinary switch port sees none of it and there
+may be no cable to bridge into. Mirroring is the only way to capture that at
+all — it is how the [Shure ACN work](docs/SHURE-ACN.md) was done.
+
 ## Preamp Control — Architecture
 
 ```
