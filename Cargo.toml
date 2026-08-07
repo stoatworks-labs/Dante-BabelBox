@@ -15,7 +15,7 @@ members = [
     "crates/plugin-ah-tcp",
     "crates/plugin-dlive-tcp",
     "crates/plugin-yamaha-dm3",
-    "crates/plugin-rednet-aes70",
+    "crates/plugin-aes70",
     "crates/preamp-cli",
     "crates/preamp-web",
     "crates/mic-core",

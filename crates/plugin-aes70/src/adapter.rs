@@ -57,7 +57,7 @@ impl Entry {
     }
 }
 
-pub struct RedNetAdapter {
+pub struct Aes70Adapter {
     id: String,
     remote: SocketAddr,
     runtime: Runtime,
@@ -66,7 +66,7 @@ pub struct RedNetAdapter {
     events: Arc<StdMutex<VecDeque<OcaEventFfi>>>,
 }
 
-impl RedNetAdapter {
+impl Aes70Adapter {
     pub fn new(id: String, remote: SocketAddr) -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -158,7 +158,31 @@ fn decode(entry: &Entry, bytes: &[u8]) -> Result<OcaValue, Ocp1Error> {
     })
 }
 
-impl RedNetAdapter {
+/// Parse `OcaDeviceManager::GetModelDescription` into (manufacturer, model).
+///
+/// AES70-1 defines the reply as an `OcaModelDescription` — three `OcaString`s:
+/// manufacturer, name, version. Some implementations answer with a single
+/// free-text string instead, so both are accepted, distinguished by whether the
+/// reading consumes the whole buffer. Returns `None` rather than a guess when
+/// neither fits.
+fn parse_model_description(params: &[u8]) -> Option<(String, String)> {
+    let mut r = Reader::new(params);
+    if let (Ok(manufacturer), Ok(name), Ok(version)) = (r.string(), r.string(), r.string()) {
+        if r.is_empty() {
+            let model =
+                if version.is_empty() { name } else { format!("{name} {version}").trim().into() };
+            return Some((manufacturer, model));
+        }
+    }
+
+    let mut r = Reader::new(params);
+    match r.string() {
+        Ok(single) if r.is_empty() && !single.is_empty() => Some(("Unknown".into(), single)),
+        _ => None,
+    }
+}
+
+impl Aes70Adapter {
     /// Write one value, choosing the wire type from the object's class. See
     /// [`decode`] for the boolean conventions.
     async fn write(client: &Client, entry: &Entry, value: OcaValue) -> Result<(), Ocp1Error> {
@@ -184,7 +208,7 @@ impl RedNetAdapter {
     }
 }
 
-impl PluginAdapter for RedNetAdapter {
+impl PluginAdapter for Aes70Adapter {
     fn id(&self) -> RString {
         self.id.clone().into()
     }
@@ -278,21 +302,23 @@ impl PluginAdapter for RedNetAdapter {
         };
         let manager = dante_babelbox_ocp1::ono::reserved::DEVICE_MANAGER;
 
-        let model = self
-            .runtime
-            .block_on(async {
-                client
-                    .request(manager, device_manager::GET_MODEL_DESCRIPTION, 0, Vec::new())
-                    .await
-                    .and_then(|r| Reader::new(&r.params).string())
-            })
-            .unwrap_or_else(|e| {
+        let described = self.runtime.block_on(async {
+            client.request(manager, device_manager::GET_MODEL_DESCRIPTION, 0, Vec::new()).await
+        });
+
+        let (vendor, model) = match described {
+            Ok(response) => parse_model_description(&response.params),
+            Err(e) => {
                 debug!(error = %e, "device would not report a model description");
-                "AES70 device".to_string()
-            });
+                None
+            }
+        }
+        // Neither field is invented when the device won't say: an unknown
+        // manufacturer stays unknown rather than being guessed from the kind.
+        .unwrap_or_else(|| ("Unknown".to_string(), "AES70 device".to_string()));
 
         RResult::ROk(RDeviceInfo {
-            vendor: "Focusrite".into(),
+            vendor: vendor.into(),
             model: model.into(),
             address: self.remote.to_string().into(),
         })
@@ -424,6 +450,54 @@ mod tests {
         let polarity = to_entry(&discovered(0x1007, &[1, 1, 1, 3], "Polarity", &[])).unwrap();
         assert_eq!(decode(&polarity, &[1]).unwrap(), OcaValue::Bool(false)); // Non-inverted
         assert_eq!(decode(&polarity, &[2]).unwrap(), OcaValue::Bool(true)); // Inverted
+    }
+
+    fn model_description(fields: &[&str]) -> Vec<u8> {
+        let mut w = dante_babelbox_ocp1::value::Writer::new();
+        for f in fields {
+            w.string(f);
+        }
+        w.finish()
+    }
+
+    #[test]
+    fn model_description_parses_the_three_string_form() {
+        let params = model_description(&["Focusrite", "RedNet MP8R", "1.2"]);
+        assert_eq!(
+            parse_model_description(&params),
+            Some(("Focusrite".into(), "RedNet MP8R 1.2".into()))
+        );
+    }
+
+    /// The whole point of generalising off Focusrite: a different vendor's
+    /// device must identify as itself.
+    #[test]
+    fn model_description_reports_whatever_vendor_the_device_claims() {
+        let params = model_description(&["Dynacord", "IPX10:4", "2.0"]);
+        assert_eq!(
+            parse_model_description(&params),
+            Some(("Dynacord".into(), "IPX10:4 2.0".into()))
+        );
+    }
+
+    #[test]
+    fn model_description_falls_back_to_a_single_free_text_string() {
+        let params = model_description(&["Some Mixer"]);
+        assert_eq!(parse_model_description(&params), Some(("Unknown".into(), "Some Mixer".into())));
+    }
+
+    #[test]
+    fn an_empty_version_does_not_leave_trailing_space() {
+        let params = model_description(&["Acme", "Widget", ""]);
+        assert_eq!(parse_model_description(&params), Some(("Acme".into(), "Widget".into())));
+    }
+
+    /// Nothing is invented when the reply makes no sense — the caller
+    /// substitutes an explicit "Unknown", it isn't guessed here.
+    #[test]
+    fn an_undecodable_reply_yields_nothing() {
+        assert_eq!(parse_model_description(&[0xFF, 0xFF]), None);
+        assert_eq!(parse_model_description(&[]), None);
     }
 
     #[test]

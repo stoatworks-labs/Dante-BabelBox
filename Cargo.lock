@@ -491,6 +491,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante-babelbox-plugin-aes70"
+version = "0.1.1"
+dependencies = [
+ "abi_stable",
+ "dante-babelbox-oca",
+ "dante-babelbox-oca-plugin-abi",
+ "dante-babelbox-ocp1",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "dante-babelbox-plugin-ah-tcp"
 version = "0.1.1"
 dependencies = [
@@ -535,18 +547,6 @@ dependencies = [
  "dante-babelbox-preamp-adapter-osc",
  "rosc",
  "tokio",
-]
-
-[[package]]
-name = "dante-babelbox-plugin-rednet-aes70"
-version = "0.1.1"
-dependencies = [
- "abi_stable",
- "dante-babelbox-oca",
- "dante-babelbox-oca-plugin-abi",
- "dante-babelbox-ocp1",
- "tokio",
- "tracing",
 ]
 
 [[package]]

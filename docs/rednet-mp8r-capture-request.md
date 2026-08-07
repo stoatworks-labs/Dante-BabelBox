@@ -1,13 +1,24 @@
-# Capture request: a Focusrite RedNet MP8R driven by a Yamaha CL/QL
+# Capture request: a third-party head amp driven by a Yamaha CL/QL
 
 **Status: open.** This is a request for evidence, not a specification. If you
-have a RedNet MP8R and a CL or QL console on the same Dante network, three
-minutes of packet capture would let this project support the MP8R over Yamaha's
-head-amp protocol as well as over AES70.
+have a **Focusrite RedNet MP8R** or a **Rupert Neve Designs RMP-D8** on a Dante
+network with a CL, QL, PM or DM7 console, three minutes of packet capture would
+let this project drive it over Yamaha's head-amp protocol.
 
 Nothing here is needed for the **AES70/OCA** path, which is already implemented
-in [`crates/plugin-rednet-aes70`](../crates/plugin-rednet-aes70) and needs no
+in [`crates/plugin-aes70`](../crates/plugin-aes70) and needs no
 Yamaha console at all. This document is about the *other* route.
+
+> **If you can only capture one device, capture the RMP-D8.** Rupert Neve
+> Designs state that it appears to the console **as a native Yamaha Rio
+> preamp** — the exact device this project already has captures of. That makes
+> it far more likely than the MP8R to match the wire format already documented
+> in [`yamaha-ha-remote-over-dante.md`](yamaha-ha-remote-over-dante.md): same
+> 32-slot arrays, same −6…+66 dB range, same identity shape. It is the cheapest
+> route from "documented" to "working", and it would very likely validate the
+> MP8R work at the same time. §2 below is written around the MP8R because that
+> is where the differences are largest; every unknown in it applies to the
+> RMP-D8 too, just with better odds on each.
 
 ---
 
@@ -51,10 +62,13 @@ standards-based alternative for the same device.
 
 ## 3. What a useful capture contains
 
-**Gear:** a CL or QL console, a RedNet MP8R with its `Yamaha ID` set to
-something other than `Off`, and a mirrored port. §3 of the
+**Gear:** a CL, QL, PM or DM7 console, a RedNet MP8R or RMP-D8 with its
+`Yamaha ID` set to something other than `Off`, and a mirrored port. §3 of the
 [capture guides](capture-guide-macos.md) has a step-by-step for a
 USW-Flex-Mini if you don't already have a mirroring switch.
+
+An RMP-D8 has 8 inputs with gain, +48 V and HPF exposed to the console; where a
+step below names an MP8R-only control (pad, impedance), just skip it.
 
 Perform these with a few seconds of silence between each, so every event is
 unambiguous in time:
@@ -86,6 +100,11 @@ Please also note the MP8R's `Yamaha ID`, its Dante device name, and its firmware
 version — the ID in particular is what ties the on-wire identity to the setting.
 
 ## 4. What would happen with one
+
+If the RMP-D8 really does present as a Rio, the answer to most of §2 is "the
+same as the Rio" and the work collapses to confirming it. That is exactly why a
+capture is worth more than any amount of further reading: it is a short question
+with a cheap experiment attached.
 
 Items 1–5 in §2 all become answerable from a single capture, and the encoder in
 `preamp-adapter-yamaha::mbc` — which already rebuilds a hardware-accepted packet
