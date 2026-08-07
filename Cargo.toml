@@ -10,6 +10,7 @@ members = [
     "crates/preamp-adapter-osc",
     "crates/preamp-adapter-ah",
     "crates/preamp-adapter-yamaha",
+    "crates/preamp-adapter-aphex",
     "crates/plugin-osc-x32",
     "crates/plugin-osc-wing",
     "crates/plugin-ah-tcp",
@@ -55,6 +56,7 @@ dante-babelbox-discovery = { path = "crates/discovery" }
 dante-babelbox-preamp-adapter-osc = { path = "crates/preamp-adapter-osc" }
 dante-babelbox-preamp-adapter-ah = { path = "crates/preamp-adapter-ah" }
 dante-babelbox-preamp-adapter-yamaha = { path = "crates/preamp-adapter-yamaha" }
+dante-babelbox-preamp-adapter-aphex = { path = "crates/preamp-adapter-aphex" }
 dante-babelbox-preamp-web = { path = "crates/preamp-web" }
 dante-babelbox-mic-core = { path = "crates/mic-core" }
 dante-babelbox-mic-adapter-shure = { path = "crates/mic-adapter-shure" }
