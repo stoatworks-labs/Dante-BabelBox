@@ -13,6 +13,12 @@ Cross-vendor Dante preamp + mic bridge (Rust). Normalizes preamp control and wir
 ## Layout (crates/)
 - `core` / `mic-core` — shared traits & models
 - `discovery` — Dante device discovery
+- `oca` — internal object model; `oca-plugin-abi` — FFI host/plugin contract
+- `ocp1` — a *real* AES70-3 (OCP.1) controller. Not the same thing as `oca`
+- `plugin-*` — dynamically-loaded device plugins (cdylib), one per vendor
+- `plugin-rednet-aes70` — Focusrite RedNet over AES70; built from the published
+  standard, enumerates the device's objects at runtime. See
+  `docs/rednet-mp8r-capture-request.md` for why the Yamaha route wasn't used
 - `preamp-adapter-{osc,ah,yamaha}` — preamp vendor adapters
 - `preamp-adapter-yamaha` also carries `mbc` — Rio/Tio + QL/CL head amps over Audinate ConMon
 - `mic-adapter-{shure,sennheiser,lectrosonics}` — wireless-mic vendor adapters (lectrosonics = placeholder wire format); `mic-adapter-shure-acn` = QLX-D on a console, read-only

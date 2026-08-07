@@ -11,6 +11,15 @@
 #                "socket" addressing, channel = socket number 1-128)
 #   "yamaha-dm3" Yamaha DM3/DM3S (official OSC spec; channel = Local
 #                Input Num 1-16; gain is coarse integer dB, 0-64 only)
+#   "rednet-aes70"
+#                Focusrite RedNet (MP8R and any RedNet unit with AES70
+#                enabled) over the AES70/OCA standard. Enable AES70 on
+#                the device first, in RedNet Control's per-device Tools
+#                menu - RedNet Control does not need to stay running
+#                afterwards. `channels` is ignored for this kind: the
+#                device's objects are discovered when the bridge
+#                connects, so a configured count could only contradict
+#                what the unit actually reports.
 #
 # "ah-midi" (Qu/SQ) and "yamaha" (CL/QL/DM7, Rio/Tio) are not implemented
 # yet - see the project task list for why. `kind` is an open string, not
@@ -47,6 +56,14 @@ id = "dm3-foh"
 kind = "yamaha-dm3"
 address = "10.0.0.25"
 port = 49900
+
+[[device]]
+id = "rednet-stage"
+kind = "rednet-aes70"
+address = "10.0.0.30"
+# AES70-3 assigns no port; 65000 is the usual convention. Confirm the real
+# one via mDNS (_oca._tcp) rather than assuming it.
+port = 65000
 
 [[mapping]]
 from = { device = "ahm-rack", channel = 3 }
