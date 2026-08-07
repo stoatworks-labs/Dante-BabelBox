@@ -116,6 +116,7 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 | Yamaha | CL, QL | `MBC` over Audinate ConMon | Partial — a QL/CL is the *controlling* side of the captured protocol, and the same adapter addresses it. Driving a console's own **local** head amps was never observed on the wire, so it is untested and may not be supported at all |
 | Yamaha | DM7 | — | Not implemented — no public spec, and nothing confirms it shares DM3's OSC dialect or the R-series `MBC` block |
 | Yamaha | Rio, Tio (R-series) | `MBC` over Audinate ConMon | Implemented — gain, +48 V and metering, from a wire format [captured and proven on real hardware](docs/yamaha-ha-remote-over-dante.md). Never run against a device. |
+| Focusrite | RedNet MP8R, and any RedNet unit with AES70 enabled | AES70/OCA (OCP.1 over TCP) | Implemented from the **published standard** — no reverse engineering. The device's objects are discovered at runtime, so there is no vendor ONo map to be wrong. Never run against a device; see the plugin's module comment for the two things to check first. |
 
 Every "Done" adapter is built from an official vendor spec (or, for the
 X32 family, the long-established community reference), not guesswork, and
@@ -216,7 +217,7 @@ to the `Router` and the web UI:
   loaded at runtime via [`abi_stable`](https://docs.rs/abi_stable). Adding
   a new vendor this way needs **no recompile of this project at all** —
   build your plugin, drop the file in the plugins directory, restart the
-  bridge. All five real preamp vendors work this way today.
+  bridge. All six real preamp vendors work this way today.
 
 ```mermaid
 flowchart LR
@@ -229,6 +230,7 @@ flowchart LR
     Ahm["libplugin_ah_tcp"] -. abi_stable FFI .-> Reg
     Dlive["libplugin_dlive_tcp"] -. abi_stable FFI .-> Reg
     Dm3["libplugin_yamaha_dm3"] -. abi_stable FFI .-> Reg
+    RedNet["libplugin_rednet_aes70"] -. abi_stable FFI .-> Reg
     Router["Router (OCA objects)"] --> Web["Patch-bay web UI"]
 ```
 
@@ -241,7 +243,10 @@ FFI-safe mirror of that same model (`dante-babelbox-oca-plugin-abi`'s
 [`docs/plugin-development-guide.md`](docs/plugin-development-guide.md) for
 the full contract, worked examples (`crates/plugin-osc-x32` for a
 hand-written translation, `crates/plugin-osc-wing` for the generic
-`LegacyPluginBridge` path every other vendor uses), and the real
+`LegacyPluginBridge` path most vendors use, and
+`crates/plugin-rednet-aes70` for one that implements `PluginAdapter`
+directly because its object set is only known once the device has been
+asked), and the real
 pitfalls hit building it (async-to-sync bridging, why a plugin's Tokio
 runtime has to be multi-threaded, why loading more than one plugin file
 sharing the same root-module type needs `abi_stable`'s uncached
@@ -505,7 +510,8 @@ procedure: **[docs/UNSIGNED.md](docs/UNSIGNED.md)**.
 - [ ] **Map the remaining Yamaha subops** — eight 32-element arrays (`0x0722` subops `10`,`12`,`13`,`15`,`18`–`1b`) that almost certainly include pad, HPF and polarity, but were never observed populated. A ten-minute capture with hardware resolves them; the procedure is written up in the doc.
 - [ ] **Validate the adapters against real hardware** — every adapter is currently tested only against mock devices; no adapter has been run on live gear.
 - [ ] **Migrate the radio-mic domain onto plugins + OCA** — give it a `Router` in the process (it has none today, since it's pure monitoring), so telemetry mapping/web-UI parity comes for free.
-- [ ] **Ship plugin binaries in release CI** — `.github/workflows/release.yml` builds only the two host binaries today; building/packaging all five `crates/plugin-*` `cdylib`s per platform is a real CI expansion, not yet done.
+- [ ] **Ship plugin binaries in release CI** — `.github/workflows/release.yml` builds only the two host binaries today; building/packaging all six `crates/plugin-*` `cdylib`s per platform is a real CI expansion, not yet done.
+- [ ] **Get a RedNet MP8R capture** — the MP8R can also be driven as a Yamaha head amp (it has a `Yamaha ID` setting, `Y000`–`Y00F`), which would reuse the `MBC` work wholesale. Five specific things can't be derived from the QL1/Rio captures because no RedNet device was on that network; [`docs/rednet-mp8r-capture-request.md`](docs/rednet-mp8r-capture-request.md) says exactly what a three-minute capture would need to contain. Until then, RedNet is supported over AES70 instead.
 - [ ] **Preamp device emulation** — make the bridge answer as a native device of a foreign brand so a console's own preamp UI controls it directly (needs packet captures of a real console+device pairing).
 - [ ] **Telemetry emulation on a host console** — e.g. surface ULX-D-shaped data on a Yamaha QL Wireless Monitor screen (same capture-dependent problem).
 - [ ] **More preamp vendors** — Allen & Heath Qu/SQ, Yamaha CL/QL/DM7, Yamaha Rio/Tio; all blocked on missing public control specs or wire-format captures. The plugin path (see below) means these no longer need to land in this repo to exist.

@@ -1,0 +1,17 @@
+[package]
+name = "dante-babelbox-plugin-rednet-aes70"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "dante_babelbox_plugin_rednet_aes70"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dante-babelbox-oca.workspace = true
+dante-babelbox-oca-plugin-abi.workspace = true
+dante-babelbox-ocp1.workspace = true
+abi_stable.workspace = true
+tokio.workspace = true
+tracing.workspace = true

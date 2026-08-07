@@ -35,9 +35,13 @@ crates/
   core/          Shared traits and models for preamps
   mic-core/      Shared traits and models for radio mics
   discovery/     Dante device discovery
+  oca/           The internal object model (Ono/OcaClass/OcaValue/OcaObject)
+  oca-plugin-abi/ The FFI-safe host<->plugin contract (abi_stable)
+  ocp1/          A real AES70-3 (OCP.1) controller - see the note below
   preamp-adapter-osc/     \
   preamp-adapter-ah/       > preamp vendor adapters
   preamp-adapter-yamaha/  /
+  plugin-*/      Dynamically-loaded device plugins (cdylib), one per vendor
   mic-adapter-shure/         \
   mic-adapter-sennheiser/     > radio-mic vendor adapters
   mic-adapter-lectrosonics/  /  <- SEE WARNING BELOW
@@ -45,6 +49,11 @@ crates/
   mic-cli/       Mic command-line entry point
   preamp-web/    Web UI
 ```
+
+**`oca` and `ocp1` are different things and the names invite confusion.** `oca`
+is the *internal* model — it borrows AES70's class taxonomy because it fits, and
+speaks no protocol. `ocp1` is an actual AES70 controller that talks OCP.1 over
+TCP to real devices. Only `plugin-rednet-aes70` uses it.
 
 ## 4. Two honesty requirements
 
@@ -69,6 +78,15 @@ adapter is built against official or community-authoritative vendor protocol spe
 adapter's module doc comment cites its source. Lectrosonics is the flagged exception. If you
 work on it, either verify the format against real gear/documentation and update the flag, or
 leave the flag exactly where it is.
+
+**The Focusrite RedNet plugin is built against a published standard, not a
+capture.** RedNet units carry an AES70 endpoint in firmware (RedNet Control's
+per-device `AES70 Enable/Disable`), so `plugin-rednet-aes70` implements AES70-1/-3
+and enumerates the device's objects at runtime rather than shipping a vendor ONo
+map. An MP8R can *also* be driven as a Yamaha head amp, and that route is
+deliberately not taken: see [`docs/rednet-mp8r-capture-request.md`](docs/rednet-mp8r-capture-request.md)
+for the five things the QL1/Rio captures can't answer about a device that wasn't
+on that network. Don't implement it from the `MBC` spec alone.
 
 When adding an adapter, follow the existing convention: **cite the protocol source in the
 module doc comment.** That's what makes the Lectrosonics exception visible rather than

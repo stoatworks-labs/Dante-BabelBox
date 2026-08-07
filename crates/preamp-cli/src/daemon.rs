@@ -294,14 +294,26 @@ mod tests {
 
     /// With a real plugins directory, `build_registry` picks up every
     /// migrated kind's dylib alongside the two static ones - proof the
-    /// loader genuinely finds and registers all five real vendor kinds,
+    /// loader genuinely finds and registers all six real vendor kinds,
     /// not just the pair still statically wired.
     #[test]
     fn build_registry_loads_every_migrated_kind_from_a_real_plugins_dir() {
         let registry = build_registry(&plugins_dir_for_tests());
         let mut kinds = registry.known_kinds();
         kinds.sort();
-        assert_eq!(kinds, vec!["ah-midi", "ah-tcp", "dlive-tcp", "osc-wing", "osc-x32", "yamaha", "yamaha-dm3"]);
+        assert_eq!(
+            kinds,
+            vec![
+                "ah-midi",
+                "ah-tcp",
+                "dlive-tcp",
+                "osc-wing",
+                "osc-x32",
+                "rednet-aes70",
+                "yamaha",
+                "yamaha-dm3"
+            ]
+        );
     }
 
     #[test]
