@@ -1,15 +1,29 @@
-//! Dynamically-loadable plugin for Focusrite RedNet preamps over AES70/OCA.
+//! Dynamically-loadable plugin for **any AES70/OCA device**.
 //!
 //! **Protocol source: the AES70 standard** (AES70-1 object model, AES70-3
 //! OCP.1 transport), implemented in `dante-babelbox-ocp1`. Nothing here is
-//! reverse-engineered — RedNet devices carry an AES70 endpoint in firmware,
-//! toggled per device by RedNet Control's `AES70 Enable/Disable` (it sits
-//! alongside Clock Source and Word Clock in the same per-device Tools menu, and
-//! is one of the settings an `Operator`-level DDM login is blocked from), so
-//! RedNet Control does not need to be running for this plugin to work. That is
-//! the practical difference from Focusrite's other documented control path,
-//! MIDI/SysEx, whose own guide states that "RedNet Control must be running to
-//! send and receive MIDI messages".
+//! reverse-engineered, and nothing here is vendor-specific: the device's
+//! objects, their classes and their names all come off the wire at connect
+//! time, so this plugin is not tied to the hardware it was written for.
+//!
+//! ## Devices this is expected to reach
+//!
+//! It was written against **Focusrite RedNet** (MP8R and any RedNet unit with
+//! AES70 enabled). RedNet units carry the AES70 endpoint in firmware, toggled
+//! per device by RedNet Control's `AES70 Enable/Disable` — it sits alongside
+//! Clock Source and Word Clock in the same per-device Tools menu, and is one of
+//! the settings an `Operator`-level DDM login is blocked from — so RedNet
+//! Control does not need to be running. That is the practical difference from
+//! Focusrite's other documented control path, MIDI/SysEx, whose own guide
+//! states that "RedNet Control must be running to send and receive MIDI
+//! messages".
+//!
+//! Other AES70 implementations should work without new protocol code. Bosch and
+//! Dynacord's OMNEO platform (IPX and IX:4 amplifiers, the MXE5 matrix engine)
+//! documents OCA/AES70 control as open for third-party integration, and d&b
+//! audiotechnik have shipped AES70 from the beginning. None of those has been
+//! tried. If one needs a quirk, the honest fix is a per-device profile here,
+//! not a second copy of the protocol.
 //!
 //! ## Why AES70 rather than the Yamaha route
 //!
@@ -30,7 +44,7 @@
 //!
 //! ## What is and isn't verified
 //!
-//! **This plugin has never been run against a RedNet device**, and neither has
+//! **This plugin has never been run against any AES70 device**, and neither has
 //! the OCP.1 crate under it. The wire format comes from a published standard
 //! rather than from guesswork, which is a better starting position than an
 //! unverified vendor protocol — but it is not the same as having been tested.
@@ -58,9 +72,13 @@ use dante_babelbox_oca_plugin_abi::{
     RPluginInfo,
 };
 
-pub use adapter::RedNetAdapter;
+pub use adapter::Aes70Adapter;
 
-const KIND: &str = "rednet-aes70";
+const KIND: &str = "aes70";
+/// The kind this plugin shipped as before it was generalised off Focusrite.
+/// Still accepted so an existing `bridge.toml` keeps working; `aes70` is the
+/// name to write in new configs.
+const LEGACY_KIND: &str = "rednet-aes70";
 
 /// AES70-3 assigns no port — discovery is meant to go via mDNS `_oca._tcp`, and
 /// a config that knows the device's port should say so. 65000 is the widely-used
@@ -70,9 +88,12 @@ const DEFAULT_PORT: u16 = dante_babelbox_ocp1::client::DEFAULT_OCP1_PORT;
 #[sabi_extern_fn]
 fn plugin_info() -> RPluginInfo {
     RPluginInfo {
-        name: "rednet-aes70".into(),
-        vendor: "Focusrite".into(),
-        supported_kinds: RVec::from(vec![RString::from(KIND)]),
+        name: "aes70".into(),
+        // The plugin implements a standard, not a manufacturer's protocol. The
+        // *device's* vendor is read from its OcaDeviceManager at connect time -
+        // see `Aes70Adapter::identify`.
+        vendor: "AES70 / OCA".into(),
+        supported_kinds: RVec::from(vec![RString::from(KIND), RString::from(LEGACY_KIND)]),
     }
 }
 
@@ -94,7 +115,7 @@ fn create_adapter(config: RDeviceConfig) -> RResult<PluginAdapterBox, RString> {
     // from the device at connect time, so a configured channel count could only
     // contradict it.
     RResult::ROk(PluginAdapter_TO::from_value(
-        RedNetAdapter::new(config.id.into_string(), remote),
+        Aes70Adapter::new(config.id.into_string(), remote),
         TD_Opaque,
     ))
 }
@@ -186,7 +207,9 @@ mod tests {
 
         /// Returns the response params, or `Err(status)`.
         fn handle(&self, cmd: &pdu::Command) -> Result<Vec<u8>, u8> {
-            use dante_babelbox_ocp1::classes::{block, level, root, single_value, subscription};
+            use dante_babelbox_ocp1::classes::{
+                block, device_manager, level, root, single_value, subscription,
+            };
 
             // Only the primary GetMembers index is implemented, so the
             // candidate fallback in `enumerate` is exercised for real: a device
@@ -215,6 +238,14 @@ mod tests {
             }
             if cmd.method == subscription::ADD_SUBSCRIPTION {
                 return Ok(Vec::new());
+            }
+            if cmd.method == device_manager::GET_MODEL_DESCRIPTION {
+                // Deliberately not Focusrite: this is what proves the adapter
+                // reports the device's own manufacturer rather than a
+                // hardcoded one.
+                let mut w = Writer::new();
+                w.string("Dynacord").string("IPX10:4").string("2.0");
+                return Ok(w.finish());
             }
             if cmd.method == single_value::get(level::GAIN) && GAIN_ONO.contains(&cmd.target) {
                 let mut w = Writer::new();
@@ -292,11 +323,18 @@ mod tests {
         }
     }
 
+    /// The plugin is named for the standard, not for the one manufacturer it
+    /// was written against - and the pre-generalisation kind still resolves so
+    /// an existing `bridge.toml` doesn't break.
     #[test]
-    fn plugin_info_declares_the_rednet_kind() {
+    fn plugin_info_declares_the_standard_kind_and_the_legacy_alias() {
         let info = plugin_info();
-        assert_eq!(info.supported_kinds.as_slice(), &[RString::from(KIND)]);
-        assert_eq!(info.vendor.as_str(), "Focusrite");
+        assert_eq!(info.name.as_str(), "aes70");
+        assert_eq!(info.vendor.as_str(), "AES70 / OCA");
+        assert_eq!(
+            info.supported_kinds.as_slice(),
+            &[RString::from("aes70"), RString::from("rednet-aes70")]
+        );
     }
 
     #[test]
@@ -389,6 +427,25 @@ mod tests {
         }
     }
 
+    /// End-to-end proof that the generalisation is real: the mock claims to be
+    /// a Dynacord, and that is what comes back — no Focusrite anywhere.
+    #[test]
+    fn identify_reports_the_devices_own_manufacturer() {
+        let (addr, _gains) = spawn_mock();
+        let RResult::ROk(mut adapter) = create_adapter(config(addr)) else {
+            panic!("create_adapter failed")
+        };
+        assert!(matches!(adapter.connect(), RResult::ROk(())));
+
+        match adapter.identify() {
+            RResult::ROk(info) => {
+                assert_eq!(info.vendor.as_str(), "Dynacord");
+                assert_eq!(info.model.as_str(), "IPX10:4 2.0");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
     #[test]
     fn operations_before_connect_fail_rather_than_panic() {
         let (addr, _gains) = spawn_mock();
@@ -428,9 +485,9 @@ mod tests {
         let dylib_path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug");
         let candidates = [
-            dylib_path.join("libdante_babelbox_plugin_rednet_aes70.dylib"),
-            dylib_path.join("libdante_babelbox_plugin_rednet_aes70.so"),
-            dylib_path.join("dante_babelbox_plugin_rednet_aes70.dll"),
+            dylib_path.join("libdante_babelbox_plugin_aes70.dylib"),
+            dylib_path.join("libdante_babelbox_plugin_aes70.so"),
+            dylib_path.join("dante_babelbox_plugin_aes70.dll"),
         ];
         let Some(path) = candidates.iter().find(|p| p.exists()) else {
             eprintln!("skipping: no built cdylib found at any of {candidates:?}");
@@ -439,7 +496,10 @@ mod tests {
 
         let root = PluginRootModule_Ref::load_from_file(path).expect("loading the plugin cdylib");
         let info = root.plugin_info()();
-        assert_eq!(info.supported_kinds.as_slice(), &[RString::from(KIND)]);
+        assert_eq!(
+            info.supported_kinds.as_slice(),
+            &[RString::from(KIND), RString::from(LEGACY_KIND)]
+        );
     }
 
     /// Guard against the runtime-starvation trap described in the module

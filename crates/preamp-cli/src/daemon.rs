@@ -304,6 +304,9 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
+                // The AES70 plugin registers both its current kind and the
+                // pre-generalisation alias it shipped as.
+                "aes70",
                 "ah-midi",
                 "ah-tcp",
                 "dlive-tcp",

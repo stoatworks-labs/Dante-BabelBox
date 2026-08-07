@@ -16,7 +16,7 @@ Cross-vendor Dante preamp + mic bridge (Rust). Normalizes preamp control and wir
 - `oca` — internal object model; `oca-plugin-abi` — FFI host/plugin contract
 - `ocp1` — a *real* AES70-3 (OCP.1) controller. Not the same thing as `oca`
 - `plugin-*` — dynamically-loaded device plugins (cdylib), one per vendor
-- `plugin-rednet-aes70` — Focusrite RedNet over AES70; built from the published
+- `plugin-aes70` — Focusrite RedNet over AES70; built from the published
   standard, enumerates the device's objects at runtime. See
   `docs/rednet-mp8r-capture-request.md` for why the Yamaha route wasn't used
 - `preamp-adapter-{osc,ah,yamaha}` — preamp vendor adapters

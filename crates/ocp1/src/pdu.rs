@@ -184,7 +184,7 @@ pub fn encode_keepalive(heartbeat_secs: u16) -> Vec<u8> {
 
 /// Encode a response PDU. Only a test/mock device needs this — a controller
 /// never emits one — but it lives here so the mock in
-/// `dante-babelbox-plugin-rednet-aes70`'s tests exercises the same encoder the
+/// `dante-babelbox-plugin-aes70`'s tests exercises the same encoder the
 /// decoder is written against, rather than a hand-rolled second copy.
 pub fn encode_response(response: &Response) -> Vec<u8> {
     // ResponseSize(4) + Handle(4) + Status(1) + ParamCount(1)

@@ -1,11 +1,11 @@
 [package]
-name = "dante-babelbox-plugin-rednet-aes70"
+name = "dante-babelbox-plugin-aes70"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "dante_babelbox_plugin_rednet_aes70"
+name = "dante_babelbox_plugin_aes70"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

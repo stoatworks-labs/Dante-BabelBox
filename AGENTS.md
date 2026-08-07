@@ -53,7 +53,7 @@ crates/
 **`oca` and `ocp1` are different things and the names invite confusion.** `oca`
 is the *internal* model — it borrows AES70's class taxonomy because it fits, and
 speaks no protocol. `ocp1` is an actual AES70 controller that talks OCP.1 over
-TCP to real devices. Only `plugin-rednet-aes70` uses it.
+TCP to real devices. Only `plugin-aes70` uses it.
 
 ## 4. Two honesty requirements
 
@@ -81,7 +81,7 @@ leave the flag exactly where it is.
 
 **The Focusrite RedNet plugin is built against a published standard, not a
 capture.** RedNet units carry an AES70 endpoint in firmware (RedNet Control's
-per-device `AES70 Enable/Disable`), so `plugin-rednet-aes70` implements AES70-1/-3
+per-device `AES70 Enable/Disable`), so `plugin-aes70` implements AES70-1/-3
 and enumerates the device's objects at runtime rather than shipping a vendor ONo
 map. An MP8R can *also* be driven as a Yamaha head amp, and that route is
 deliberately not taken: see [`docs/rednet-mp8r-capture-request.md`](docs/rednet-mp8r-capture-request.md)
