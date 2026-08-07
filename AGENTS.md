@@ -41,6 +41,7 @@ crates/
   preamp-adapter-osc/     \
   preamp-adapter-ah/       > preamp vendor adapters
   preamp-adapter-yamaha/  /
+  preamp-adapter-aphex/   <- CODEC ONLY, no transport - see below
   plugin-*/      Dynamically-loaded device plugins (cdylib), one per vendor
   mic-adapter-shure/         \
   mic-adapter-sennheiser/     > radio-mic vendor adapters
@@ -87,6 +88,15 @@ map. An MP8R can *also* be driven as a Yamaha head amp, and that route is
 deliberately not taken: see [`docs/rednet-mp8r-capture-request.md`](docs/rednet-mp8r-capture-request.md)
 for the five things the QL1/Rio captures can't answer about a device that wasn't
 on that network. Don't implement it from the `MBC` spec alone.
+
+**`preamp-adapter-aphex` is a codec with no transport, on purpose.** It builds and
+parses the Aphex 1788A's SysEx correctly, from Aphex's own published command table,
+but nothing sends it — the table documents the MIDI layer, and how SysEx is framed
+over the unit's Ethernet port isn't published. Picking MIDI would make it the only
+device here not on an IP socket and would add a MIDI backend plus ALSA headers to
+Linux release CI, so that is a decision to take deliberately, not by drifting into
+it. Three things the source document doesn't answer are listed in the crate's module
+comment; don't paper over them.
 
 When adding an adapter, follow the existing convention: **cite the protocol source in the
 module doc comment.** That's what makes the Lectrosonics exception visible rather than

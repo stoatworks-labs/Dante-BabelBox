@@ -573,6 +573,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante-babelbox-preamp-adapter-aphex"
+version = "0.1.1"
+dependencies = [
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "dante-babelbox-preamp-adapter-osc"
 version = "0.1.1"
 dependencies = [
