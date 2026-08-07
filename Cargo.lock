@@ -376,7 +376,7 @@ dependencies = [
  "dante-babelbox-oca",
  "dante-babelbox-oca-plugin-abi",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
  "tracing",
 ]
@@ -485,7 +485,7 @@ dependencies = [
 name = "dante-babelbox-ocp1"
 version = "0.1.1"
 dependencies = [
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
  "tracing",
 ]
@@ -576,7 +576,7 @@ dependencies = [
 name = "dante-babelbox-preamp-adapter-aphex"
 version = "0.1.1"
 dependencies = [
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
