@@ -1,0 +1,36 @@
+name: ci
+
+# Until this existed the repo had no workflow with a `pull_request` trigger at
+# all — only a tag-driven release — so Dependabot bumps arrived with no status
+# check to gate a merge on and simply accumulated.
+#
+# `cargo fmt --check` is deliberately not a step: it is already failing on main
+# (crates/core/src/channel_mapping.rs among others), and gating every bump on a
+# pre-existing formatting drift would block the PRs this workflow exists to
+# unblock. Run `cargo fmt --all` once, then add the step.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test
