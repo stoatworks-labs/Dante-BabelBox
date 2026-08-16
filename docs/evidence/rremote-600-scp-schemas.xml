@@ -1,0 +1,1034 @@
+<function name="Backup" collections="7" parameters="19" datasize="615" stringsize="6">
+<collections>
+<collection name="InCh" datasize="9" arraysize="32">
+<parameter name="48VOn" type="int8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="HPFOn" type="int8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="GainCompOn" type="int8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="HPFFreq" type="int16_t" arraysize="1">
+<minimum>4</minimum>
+<maximum>63</maximum>
+<default>28</default>
+</parameter>
+<parameter name="HAGain" type="int16_t" arraysize="1">
+<minimum>-6</minimum>
+<maximum>66</maximum>
+<default>-6</default>
+<unit>dB</unit>
+<nominal>0</nominal>
+</parameter>
+<parameter name="CompGain" type="int16_t" arraysize="1">
+<minimum>-6</minimum>
+<maximum>66</maximum>
+<default>-6</default>
+<unit>dB</unit>
+<nominal>0</nominal>
+</parameter>
+</collection>
+<collection name="OutCh" datasize="10" arraysize="24">
+<parameter name="DelayOn" type="int8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="DelayTime" type="int32_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1000000</maximum>
+<default>0</default>
+</parameter>
+<parameter name="Polarity" type="int8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="GainLevel" type="int32_t" arraysize="1">
+<minimum>-9600</minimum>
+<maximum>2400</maximum>
+<default>0</default>
+<nominal>0</nominal>
+</parameter>
+</collection>
+<collection name="OutChAES" datasize="10" arraysize="8">
+<parameter name="DelayOn" type="int8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="DelayTime" type="int32_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1000000</maximum>
+<default>0</default>
+</parameter>
+<parameter name="Polarity" type="int8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="GainLevel" type="int32_t" arraysize="1">
+<minimum>-9600</minimum>
+<maximum>2400</maximum>
+<default>0</default>
+<nominal>0</nominal>
+</parameter>
+</collection>
+<collection name="Headphone" datasize="2" arraysize="2">
+<parameter name="Mono" type="int8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>1</default>
+</parameter>
+<parameter name="Assign" type="int8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>58</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="MeterSetup" datasize="1" arraysize="1">
+<parameter name="PeakHold" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="OutputSetup" datasize="2" arraysize="1">
+<parameter name="DelayScale" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>4</maximum>
+<default>3</default>
+</parameter>
+<parameter name="DelayFrame" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>6</maximum>
+<default>0</default>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="Current" collections="2" parameters="17" datasize="41" stringsize="0">
+<collections>
+<collection name="Dev" datasize="41" arraysize="1">
+<parameter name="48VMasterOn" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="48VLeaderOn" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="48VActiveOn" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="MuteOn" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="WordclockFs" type="int32_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>192000</maximum>
+<default>96000</default>
+</parameter>
+<parameter name="OutputImpedance" type="string" arraysize="1">
+<maximum>4</maximum>
+</parameter>
+<parameter name="CurrIPSelectMode" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>3</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurrIPAddress" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurrSubnetMask" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurrDefaultGateway" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextIPSelectMode" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>3</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextIPAddress" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextSubnetMask" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextDefaultGateway" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="ExecMode" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>2</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SystemStatus" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>13</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SyncStatus" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>13</maximum>
+<default>0</default>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="Event" collections="4" parameters="3" datasize="57" stringsize="0">
+<collections>
+<collection name="Dev" datasize="1" arraysize="1">
+<parameter name="Identify" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="InCh" datasize="1" arraysize="32">
+<parameter name="Identify" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="OutCh" datasize="1" arraysize="24">
+<parameter name="Identify" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="DevInfo" collections="4" parameters="13" datasize="100" stringsize="0">
+<collections>
+<collection name="devstatus" datasize="64" arraysize="1">
+<parameter name="runmode" type="string" arraysize="1">
+<maximum>32</maximum>
+</parameter>
+<parameter name="error" type="string" arraysize="1">
+<maximum>32</maximum>
+</parameter>
+</collection>
+<collection name="scpmode" datasize="4" arraysize="1">
+<parameter name="keepalive" type="uint32_t" arraysize="1">
+<minimum>1000</minimum>
+<maximum>600000</maximum>
+<default>10000</default>
+</parameter>
+</collection>
+<collection name="devinfo" datasize="32" arraysize="1">
+<parameter name="protocolver" type="string" arraysize="1">
+<maximum>32</maximum>
+</parameter>
+<parameter name="paramsetver" type="string" arraysize="0">
+<maximum>32</maximum>
+</parameter>
+<parameter name="version" type="string" arraysize="0">
+<maximum>16</maximum>
+</parameter>
+<parameter name="productname" type="string" arraysize="0">
+<maximum>32</maximum>
+</parameter>
+<parameter name="manufacturer" type="string" arraysize="0">
+<maximum>32</maximum>
+</parameter>
+<parameter name="category" type="string" arraysize="0">
+<maximum>16</maximum>
+</parameter>
+<parameter name="deviceid" type="string" arraysize="0">
+<maximum>4</maximum>
+</parameter>
+<parameter name="devicename" type="string" arraysize="0">
+<maximum>128</maximum>
+</parameter>
+<parameter name="inputport" type="string" arraysize="0">
+<maximum>4</maximum>
+</parameter>
+<parameter name="outputport" type="string" arraysize="0">
+<maximum>4</maximum>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="DevState" collections="2" parameters="5" datasize="5" stringsize="0">
+<collections>
+<collection name="devstate" datasize="5" arraysize="1">
+<parameter name="ConnectionState" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>3</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SlotState" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>2</maximum>
+<default>0</default>
+</parameter>
+<parameter name="ConnectReq" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="DisconnectReq" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="DeviceNum" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>125</maximum>
+<default>0</default>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="ListItem" collections="2" parameters="16" datasize="538" stringsize="0">
+<collections>
+<collection name="listitem" datasize="538" arraysize="1">
+<parameter name="CurSummaryNumReq" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurSummaryNumReceived" type="int8_t" arraysize="1">
+<minimum>-1</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurSummaryNum" type="uint16_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>0xffff</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurSummaryStart" type="uint16_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>0xffff</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurSummaryEnd" type="uint16_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>0xffff</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurSummaryItemReq" type="int32_t" arraysize="1">
+<minimum>-1</minimum>
+<maximum>0xffff</maximum>
+<default>-1</default>
+</parameter>
+<parameter name="CurSummaryItemReceived" type="int8_t" arraysize="1">
+<minimum>-1</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurSummaryItem" type="string" arraysize="0">
+<maximum>256</maximum>
+</parameter>
+<parameter name="EvtSummaryNumReq" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="EvtSummaryNumReceived" type="int8_t" arraysize="1">
+<minimum>-1</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="EvtSummaryNum" type="uint16_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>0xffff</maximum>
+<default>0</default>
+</parameter>
+<parameter name="EvtSummaryStart" type="uint16_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>0xffff</maximum>
+<default>0</default>
+</parameter>
+<parameter name="EvtSummaryEnd" type="uint16_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>0xffff</maximum>
+<default>0</default>
+</parameter>
+<parameter name="EvtSummaryItemReq" type="int32_t" arraysize="1">
+<minimum>-1</minimum>
+<maximum>0xffff</maximum>
+<default>-1</default>
+</parameter>
+<parameter name="EvtSummaryItemReceived" type="int8_t" arraysize="1">
+<minimum>-1</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="EvtSummaryItem" type="string" arraysize="0">
+<maximum>256</maximum>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="LogEvent" collections="2" parameters="2" datasize="320" stringsize="0">
+<collections>
+<collection name="event" datasize="320" arraysize="1">
+<parameter name="loggingSend" type="string" arraysize="1">
+<maximum>64</maximum>
+</parameter>
+<parameter name="TftpURISend" type="string" arraysize="1">
+<maximum>256</maximum>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="Backup" collections="2" parameters="1" datasize="128" stringsize="0">
+<collections>
+<collection name="Patch" datasize="1" arraysize="128">
+<parameter name="UserPatchSrc" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>255</default>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="Current" collections="3" parameters="26" datasize="65" stringsize="2">
+<collections>
+<collection name="Dev" datasize="37" arraysize="1">
+<parameter name="WordClockSelect" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>3</maximum>
+<default>0</default>
+</parameter>
+<parameter name="MasterWCLKLockStatus" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="RoutingPattern" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>7</maximum>
+<default>0</default>
+</parameter>
+<parameter name="PowerOn" type="uint8_t" arraysize="2">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="PanelLock" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="UserPatch" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurrIPSelectMode" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>3</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurrIPAddress" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurrSubnetMask" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurrDefaultGateway" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextIPSelectMode" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>3</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextIPAddress" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextSubnetMask" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextDefaultGateway" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SystemStatus" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>11</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SyncStatus" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>12</maximum>
+<default>0</default>
+</parameter>
+<parameter name="RRemoteFWUpdateMode" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="RRemoteFWUpdateProgress" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>100</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="Slot" datasize="7" arraysize="4">
+<parameter name="SRCOn" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SRCSource" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SLOTLockStatus" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>4</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CardName" type="string" arraysize="1">
+<minimum>0</minimum>
+<maximum>0x7f</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SLOTInputPortNum" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>16</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SLOTOutputPortNum" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>16</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SRCLockStatus" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CardSRCEnable" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="Event" collections="2" parameters="1" datasize="1" stringsize="0">
+<collections>
+<collection name="Dev" datasize="1" arraysize="1">
+<parameter name="Identify" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="DevInfo" collections="4" parameters="13" datasize="100" stringsize="0">
+<collections>
+<collection name="devstatus" datasize="64" arraysize="1">
+<parameter name="runmode" type="string" arraysize="1">
+<maximum>32</maximum>
+</parameter>
+<parameter name="error" type="string" arraysize="1">
+<maximum>32</maximum>
+</parameter>
+</collection>
+<collection name="scpmode" datasize="4" arraysize="1">
+<parameter name="keepalive" type="uint32_t" arraysize="1">
+<minimum>1000</minimum>
+<maximum>600000</maximum>
+<default>10000</default>
+</parameter>
+</collection>
+<collection name="devinfo" datasize="32" arraysize="1">
+<parameter name="protocolver" type="string" arraysize="1">
+<maximum>32</maximum>
+</parameter>
+<parameter name="paramsetver" type="string" arraysize="0">
+<maximum>32</maximum>
+</parameter>
+<parameter name="version" type="string" arraysize="0">
+<maximum>16</maximum>
+</parameter>
+<parameter name="productname" type="string" arraysize="0">
+<maximum>32</maximum>
+</parameter>
+<parameter name="manufacturer" type="string" arraysize="0">
+<maximum>32</maximum>
+</parameter>
+<parameter name="category" type="string" arraysize="0">
+<maximum>16</maximum>
+</parameter>
+<parameter name="deviceid" type="string" arraysize="0">
+<maximum>4</maximum>
+</parameter>
+<parameter name="devicename" type="string" arraysize="0">
+<maximum>128</maximum>
+</parameter>
+<parameter name="inputport" type="string" arraysize="0">
+<maximum>4</maximum>
+</parameter>
+<parameter name="outputport" type="string" arraysize="0">
+<maximum>4</maximum>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="DevState" collections="2" parameters="5" datasize="5" stringsize="0">
+<collections>
+<collection name="devstate" datasize="5" arraysize="1">
+<parameter name="ConnectionState" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>3</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SlotState" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>2</maximum>
+<default>0</default>
+</parameter>
+<parameter name="ConnectReq" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="DisconnectReq" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="DeviceNum" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>125</maximum>
+<default>0</default>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="Current" collections="16" parameters="47" datasize="47" stringsize="0">
+<collections>
+<collection name="Dev" datasize="36" arraysize="1">
+<parameter name="SystemStatus" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>11</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SyncStatus" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>12</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurrIPSelectMode" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>3</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurrIPAddress" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurrSubnetMask" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="CurrDefaultGateway" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextIPSelectMode" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>3</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextIPAddress" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextSubnetMask" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<parameter name="NextDefaultGateway" type="uint8_t" arraysize="4">
+<minimum>0</minimum>
+<maximum>255</maximum>
+<default>0</default>
+</parameter>
+<collection name="MasterWCLK" datasize="2" arraysize="1">
+<parameter name="Sel" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>2</maximum>
+<default>0</default>
+</parameter>
+<parameter name="Fs" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>5</maximum>
+<default>1</default>
+</parameter>
+</collection>
+<collection name="MasterWCLK_Dante" datasize="2" arraysize="1">
+<parameter name="Fs" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>5</maximum>
+<default>1</default>
+</parameter>
+<parameter name="LockUnlock" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="MasterWCLK_MADI" datasize="1" arraysize="1">
+<parameter name="LockUnlock" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="MasterWCLK_WCLKIN" datasize="1" arraysize="1">
+<parameter name="LockUnlock" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="ExtCtrl" datasize="1" arraysize="1">
+<parameter name="On" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="Meter" datasize="1" arraysize="1">
+<parameter name="Select" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>4</maximum>
+<default>0</default>
+</parameter>
+</collection>
+</collection>
+<collection name="SRC" datasize="1" arraysize="1">
+<parameter name="On" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="SRCInputClock" datasize="1" arraysize="1">
+<parameter name="Source" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="SRCClock_MADI" datasize="1" arraysize="1">
+<parameter name="LockUnlock" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="SRCClock_WCLKIN" datasize="1" arraysize="1">
+<parameter name="LockUnlock" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="SRCOutputClock" datasize="1" arraysize="1">
+<parameter name="Source" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="InputRate" datasize="2" arraysize="1">
+<parameter name="Fs" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="FsRate" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>2</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="InStatus" datasize="2" arraysize="1">
+<parameter name="Frame" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>2</maximum>
+<default>2</default>
+</parameter>
+<parameter name="Channel" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>2</maximum>
+<default>2</default>
+</parameter>
+</collection>
+<collection name="OutStatus" datasize="2" arraysize="1">
+<parameter name="Frame" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>2</maximum>
+<default>0</default>
+</parameter>
+<parameter name="Channel" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>2</maximum>
+<default>0</default>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="Event" collections="4" parameters="3" datasize="57" stringsize="0">
+<collections>
+<collection name="Dev" datasize="1" arraysize="1">
+<parameter name="Identify" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="InCh" datasize="1" arraysize="32">
+<parameter name="Identify" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+<collection name="OutCh" datasize="1" arraysize="24">
+<parameter name="Identify" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="DevInfo" collections="4" parameters="13" datasize="100" stringsize="0">
+<collections>
+<collection name="devstatus" datasize="64" arraysize="1">
+<parameter name="runmode" type="string" arraysize="1">
+<maximum>32</maximum>
+</parameter>
+<parameter name="error" type="string" arraysize="1">
+<maximum>32</maximum>
+</parameter>
+</collection>
+<collection name="scpmode" datasize="4" arraysize="1">
+<parameter name="keepalive" type="uint32_t" arraysize="1">
+<minimum>1000</minimum>
+<maximum>600000</maximum>
+<default>10000</default>
+</parameter>
+</collection>
+<collection name="devinfo" datasize="32" arraysize="1">
+<parameter name="protocolver" type="string" arraysize="1">
+<maximum>32</maximum>
+</parameter>
+<parameter name="paramsetver" type="string" arraysize="0">
+<maximum>32</maximum>
+</parameter>
+<parameter name="version" type="string" arraysize="0">
+<maximum>16</maximum>
+</parameter>
+<parameter name="productname" type="string" arraysize="0">
+<maximum>32</maximum>
+</parameter>
+<parameter name="manufacturer" type="string" arraysize="0">
+<maximum>32</maximum>
+</parameter>
+<parameter name="category" type="string" arraysize="0">
+<maximum>16</maximum>
+</parameter>
+<parameter name="deviceid" type="string" arraysize="0">
+<maximum>4</maximum>
+</parameter>
+<parameter name="devicename" type="string" arraysize="0">
+<maximum>128</maximum>
+</parameter>
+<parameter name="inputport" type="string" arraysize="0">
+<maximum>4</maximum>
+</parameter>
+<parameter name="outputport" type="string" arraysize="0">
+<maximum>4</maximum>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="DevState" collections="2" parameters="5" datasize="5" stringsize="0">
+<collections>
+<collection name="devstate" datasize="5" arraysize="1">
+<parameter name="ConnectionState" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>3</maximum>
+<default>0</default>
+</parameter>
+<parameter name="SlotState" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>2</maximum>
+<default>0</default>
+</parameter>
+<parameter name="ConnectReq" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="DisconnectReq" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>1</maximum>
+<default>0</default>
+</parameter>
+<parameter name="DeviceNum" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>125</maximum>
+<default>0</default>
+</parameter>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="ProjSetup" collections="3" parameters="3" datasize="72" stringsize="0">
+<collections>
+<collection name="RackMount" datasize="72" arraysize="1">
+<collection name="Rio" datasize="3" arraysize="24">
+<parameter name="Model" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>32</maximum>
+<default>0</default>
+</parameter>
+<parameter name="UnitID" type="uint8_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>63</maximum>
+<default>0</default>
+</parameter>
+<parameter name="DeviceID" type="int8_t" arraysize="1">
+<minimum>-1</minimum>
+<maximum>127</maximum>
+<default>-1</default>
+</parameter>
+</collection>
+</collection>
+</collections>
+</function>
+
+<!-- ---- -->
+
+<function name="DataInfo" collections="2" parameters="5" datasize="56" stringsize="0">
+<collections>
+<collection name="DataInfo" datasize="56" arraysize="1">
+<parameter name="Version" type="uint32_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>0xffffffff</maximum>
+<default>0</default>
+</parameter>
+<parameter name="ModelType" type="string" arraysize="1">
+<maximum>12</maximum>
+</parameter>
+<parameter name="UnitID" type="uint32_t" arraysize="1">
+<minimum>0</minimum>
+<maximum>31</maximum>
+<default>0</default>
+</parameter>
+<parameter name="ModelName" type="string" arraysize="1">
+<maximum>24</maximum>
+</parameter>
+<parameter name="MMSField" type="string" arraysize="1">
+<maximum>12</maximum>
+</parameter>
+</collection>
+</collections>
+</function>
