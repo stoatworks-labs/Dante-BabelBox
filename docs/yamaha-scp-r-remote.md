@@ -69,8 +69,70 @@ unsigned int)` and `getCommandNum()` — plus address info via `getCommAddrInfo(
 *is* an association step, so control is not simply fire-and-forget. But it is an
 **SCP-level association performed by a software controller**, not a console
 pairing — which is the encouraging reading: Yamaha ships a supported way for a
-non-console client to take control of a Rio. Recovering the actual command list
-from `RioAssoSeq`'s static data is the obvious next step.
+non-console client to take control of a Rio. The command list has since been
+recovered; see the next section.
+
+## The association sequence, decoded — **[HIGH]**
+
+Recovered from the static tables and the disassembly of
+`RRmt::AssoSeq::{getCommand,getCommandNum,addOffsetInfo}` and each family's
+`getCommAddrInfo` / `getCommAddrNum`.
+
+Each family carries a table of 20-byte entries:
+
+| Offset | Meaning |
+|---|---|
+| `+0` | constant **3** in all three families — a command/scope selector; exact meaning not pinned |
+| `+4` | **parameter index**, essentially sequential from 0 |
+| `+8` | explicit element count, used when `+16` is 0 or > 3 |
+| `+12` | unused in every entry observed (always 0) |
+| `+16` | **array-size selector**: `1`→32, `2`→24, `3`→8, otherwise use `+8` |
+
+The constructor walks the table calling `addOffsetInfo(runningIndex, count)`, so
+the sequence is a flat list of `(parameter, element)` pairs. `getCommand` then
+resolves a flat index back into a `ScpSequenceItem` laid out as
+`{ +0 = 3, +8 = parameter index, +0xc = element index, +0x10 = 0 }`.
+
+| Family | Table | Entries | Expanded commands |
+|---|---|---|---|
+| Rio | `0x10023bf30` | 33 | **359** |
+| RSio | `0x10023c270` | 23 | 193 |
+| RMio | `0x10023c4e0` | 28 | 46 |
+
+### It cross-validates the schema extraction
+
+The Rio's first 19 entries line up **exactly** with the `Backup` schema's 19
+parameters, array sizes included:
+
+| Entries | Count each | Schema collection |
+|---|---|---|
+| 0–5 | 32 | `InCh[32]` — the six head-amp parameters |
+| 6–9 | 24 | `OutCh[24]` — four parameters |
+| 10–13 | 8 | `OutChAES[8]` — four parameters |
+| 14–15 | 2 | `Headphone[2]` — `Mono`, `Assign` |
+| 16 | 1 | `MeterSetup` — `PeakHold` |
+| 17–18 | 1 | `OutputSetup` — `DelayScale`, `DelayFrame` |
+
+The remaining 14 entries cover most of the device-level `Current`/`Dev` set —
+the `1,4,4,4,1,4,4,4,1,1,1` tail matches the IP-quartet block
+(`Curr*`/`Next*` address, mask, gateway) followed by `ExecMode`, `SystemStatus`,
+`SyncStatus`. Three of `Current`'s 17 parameters are not subscribed.
+
+Two independently-recovered artefacts — an XML schema in the string table and a
+binary table read via disassembly — agreeing on parameter counts and array sizes
+is a strong check on both.
+
+### What association actually is
+
+**It is a full state read, not a cryptographic handshake.** 359 commands for a
+Rio, being every parameter of every channel, plus device-level state. Nothing in
+the sequence resembles a challenge, a key, a token, or a pairing exchange.
+
+That is the strongest evidence yet on the cold-accept question: association looks
+like *negotiate the session, then sync all state*. A client that connects,
+negotiates and reads should be able to write. It does not prove a Rio will accept
+an unassociated write — but it removes the fear that a console-specific pairing
+secret stands in the way.
 
 ## The Rio parameter set — **[HIGH]**
 
@@ -177,8 +239,11 @@ which is what any future device-emulation work needs.
   disassembling around `VComTcpClientSocket::connect`.
 - **Wire framing of `SET`/`GET`.** The command names and the parameter model are
   solid; the serialisation is not established.
-- **The `RioAssoSeq` command list** — static data, extractable, and the thing that
-  answers what a controller must do before it may write.
+- **What the constant `3` at entry offset `+0` selects.** Identical across Rio,
+  RSio and RMio, so it is not a device id. Most plausibly a command or scope
+  selector, but it is not pinned.
+- **The three `Current` parameters the association does not subscribe to** — worth
+  identifying, in case they are write-only or require a separate request.
 - **Whether Yamaha publishes an SCP spec covering R-series.** Yamaha documents SCP
   for other product lines; if R-series is covered, much of this becomes
   "implemented from a published spec" rather than reverse-engineered, which
