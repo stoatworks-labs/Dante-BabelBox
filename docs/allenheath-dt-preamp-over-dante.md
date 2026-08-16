@@ -54,12 +54,17 @@ distinct message class (purpose unknown, **[OPEN]**).
 the `AllenHth` ConMon namespace, the SQ is reachable by the *same* codec in
 principle — see "The SQ question" below.
 
-**[OPEN]** The exact ConMon envelope on the wire (head layout, whether messages
-go to the control or monitoring channel, unicast vs. the `vendor_broadcast`
-path the strings mention) is DAPI's internal business and was not reversed to
-the byte. This is why the Rust side is a **codec only, with no ConMon transport**
-— the same stopping point as the Aphex adapter, and for the same reason (the
-transport needs Audinate DAPI, which this workspace does not link).
+**[CLOSED 2026-08-08]** The ConMon envelope on the wire was recovered from a real
+DVS capture — see "The ConMon wire envelope" below, implemented as
+`wrap_conmon`/`parse_conmon`. What remains open is the **body** sub-framing
+inside that envelope, which is vendor-specific and still needs one capture of a
+real `AllenHth` device.
+
+The Rust side is nonetheless still a **codec only, with no ConMon transport** —
+the same stopping point as the Aphex adapter. Note the reason is now weaker than
+"DAPI is required": the Yamaha MBC work had a plain UDP socket accepted by a real
+Rio, so whether `AllenHth` genuinely needs DAPI is itself untested. See the
+optional test in [`sq-capture-playbook.md`](sq-capture-playbook.md).
 
 ## Device model
 
@@ -164,11 +169,14 @@ See the capture guides in `docs/`.
 
 | Open question | How to close it |
 |---|---|
-| ConMon envelope / channel | One capture of the app setting a gain; read the ConMon head. |
-| `u16` gain endianness | Same capture: set a known gain, see the two bytes. |
-| UWORD→dB scale + range | Sweep the app's gain knob across its range while capturing. |
-| Set-message field offsets | Same gain-set capture. |
-| SQ answers `AllenHth` mic-pre? | Capture an SQ (or point the app at one). |
+| ~~ConMon envelope / channel~~ | **Closed 2026-08-08** from a real DVS capture — see below. |
+| Vendor **body** sub-framing | One capture of a real `AllenHth` device (DT box, or an SQ if it answers). |
+| `u16` gain endianness | Set a known gain and read the two bytes — `+30 dB` should be `80 1E` big-endian, `1E 80` little. |
+| UWORD→dB scale + range | Park at a series of known dB values across the range while capturing. |
+| Set-message field offsets | Same gain-set capture, controller→device direction. |
+| SQ answers `AllenHth` mic-pre? | Capture an SQ (or point the app at one) — [`sq-capture-playbook.md`](sq-capture-playbook.md). |
+| Device-side CMC response | Capture DC connecting to any **remote** real device (same-host DVS won't do). |
+| Does the transport actually need DAPI? | Send a read-only poll from a plain socket; the Yamaha MBC precedent says it may not. |
 | `AllenHthZT` class | Capture around device discovery / naming / metering. |
 
 ## Live transport findings (2026-08-08, no hardware)
