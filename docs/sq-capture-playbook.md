@@ -8,6 +8,11 @@ Written for a bench with an **SQ + Dante card (KLANTE)**, **Dante Virtual
 Soundcard**, and a **Dante AVIO USB** adapter. Each plays a different role — see
 "What each box is for" below.
 
+> If the bench also has **R Remote** and **DT Preamp Control** available, run
+> [`bench-session-playbook.md`](bench-session-playbook.md) instead — it sequences
+> this procedure alongside the emulator work those two apps make possible, and
+> the SQ steps here are Phase 5 of it.
+
 ## What we're after
 
 Ordered by value-per-minute on the bench.
