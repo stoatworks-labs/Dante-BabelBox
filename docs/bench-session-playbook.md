@@ -36,11 +36,9 @@ hardware emits it.
 
 ## Before the session — build tasks
 
-- [ ] **`tools/rio-fake` does not exist yet.** Phase 3 depends on it. Adapt
-      `tools/dt-fake/fake_dt168.py`: same mDNS beacon mechanics pinned to one
-      interface, but advertising as an R-series device, plus a TCP listener that
-      logs bytes and can be given canned replies. It does **not** need to be
-      correct to be useful — see Phase 3a.
+- [x] **`tools/rio-fake` is written** — see its
+      [README](../tools/rio-fake/README.md). Smoke-tested locally over loopback;
+      never yet run against R Remote.
 - [ ] Confirm `tools/dt-fake/fake_dt168.py` still runs on this machine.
 - [ ] Have Wireshark/tshark, Dante Controller, SQ-MixPad, R Remote and DT Preamp
       Control all installed and launchable.
@@ -125,8 +123,14 @@ The fake does **not** need to work. Advertise something R-series-shaped and let
 R Remote try to connect: **the SYN alone reveals the port.** If discovery is
 enough to trigger a connection attempt, this is a five-minute result.
 
-- [ ] Start `rio-fake` beacon pinned to the Dante NIC.
-- [ ] Watch for any TCP SYN from the R Remote host. Record the destination port.
+```bash
+python3 tools/rio-fake/fake_rio.py --iface <dante-nic> --log phase3.log
+```
+
+- [ ] Watch for the `*** TCP CONNECT ... SCP PORT = N ***` line.
+- [ ] If nothing appears, the port is outside the candidate list — run the
+      `tcpdump` line the tool prints at startup in a second terminal to catch
+      SYNs to ports it never bound.
 
 ### 3b — the framing, by iteration
 
