@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "abi_stable",
  "anyhow",
@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-discovery"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "mdns-sd",
@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-mic-adapter-lectrosonics"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "dante-babelbox-mic-core",
@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-mic-adapter-sennheiser"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "dante-babelbox-mic-core",
@@ -414,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-mic-adapter-shure"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "dante-babelbox-mic-core",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-mic-adapter-shure-acn"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "dante-babelbox-core",
@@ -437,7 +437,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-mic-cli"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -456,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-mic-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "dante-babelbox-core",
@@ -467,7 +467,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-oca"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-oca-plugin-abi"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "abi_stable",
  "dante-babelbox-oca",
@@ -483,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-ocp1"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "thiserror 1.0.69",
  "tokio",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-plugin-aes70"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "abi_stable",
  "dante-babelbox-oca",
@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-plugin-ah-tcp"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "abi_stable",
  "dante-babelbox-core",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-plugin-dlive-tcp"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "abi_stable",
  "dante-babelbox-core",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-plugin-osc-wing"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "abi_stable",
  "dante-babelbox-core",
@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-plugin-osc-x32"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "abi_stable",
  "dante-babelbox-core",
@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-plugin-yamaha-dm3"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "abi_stable",
  "dante-babelbox-core",
@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-preamp-adapter-ah"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "dante-babelbox-core",
@@ -574,14 +574,14 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-preamp-adapter-aphex"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "dante-babelbox-preamp-adapter-osc"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "dante-babelbox-core",
@@ -593,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-preamp-adapter-yamaha"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "dante-babelbox-core",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-preamp-cli"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-preamp-web"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
