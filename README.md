@@ -56,17 +56,13 @@ flowchart LR
 
 ## Download
 
-**[v0.1.1](https://github.com/stoatworks-labs/Dante-BabelBox/releases/tag/v0.1.1)** — prebuilt for macOS, Windows and Linux. Pick your platform:
+**[v0.2.0](https://github.com/stoatworks-labs/Dante-BabelBox/releases/tag/v0.2.0)** — prebuilt for macOS, Windows and Linux. Pick your platform:
 
 <details>
 <summary><b>macOS</b> — Apple Silicon, Intel</summary>
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Apple Silicon · .dmg disk image (CLI) | [`dante-babelbox-0.1.1-macos-aarch64-cli.dmg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-aarch64-cli.dmg) | 6.9 MB |
-| Intel · .dmg disk image (CLI) | [`dante-babelbox-0.1.1-macos-x86_64-cli.dmg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-x86_64-cli.dmg) | 7.2 MB |
-| Apple Silicon · .pkg installer (CLI) | [`dante-babelbox-0.1.1-macos-aarch64-cli.pkg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-aarch64-cli.pkg) | 6.2 MB |
-| Intel · .pkg installer (CLI) | [`dante-babelbox-0.1.1-macos-x86_64-cli.pkg`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-macos-x86_64-cli.pkg) | 6.5 MB |
 | Apple Silicon · .tar.gz archive | [`dante-babelbox-macos-aarch64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-macos-aarch64.tar.gz) | 4.3 MB |
 | Intel · .tar.gz archive | [`dante-babelbox-macos-x86_64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-macos-x86_64.tar.gz) | 4.4 MB |
 
@@ -77,8 +73,6 @@ flowchart LR
 
 | Build | Download | Size |
 | --- | --- | --- |
-| x64 · .exe installer | [`dante-babelbox-0.1.1-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-windows-x86_64-setup.exe) | 3.0 MB |
-| ARM64 · .exe installer | [`dante-babelbox-0.1.1-windows-aarch64-setup.exe`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-windows-aarch64-setup.exe) | 2.7 MB |
 | x64 · .zip archive | [`dante-babelbox-windows-x86_64.zip`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-windows-x86_64.zip) | 3.8 MB |
 | ARM64 · .zip archive | [`dante-babelbox-windows-aarch64.zip`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-windows-aarch64.zip) | 3.6 MB |
 
@@ -89,10 +83,10 @@ flowchart LR
 
 | Build | Download | Size |
 | --- | --- | --- |
-| x64 · .deb package (Debian/Ubuntu) | [`dante-babelbox_0.1.1_amd64.deb`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox_0.1.1_amd64.deb) | 4.8 MB |
-| ARM64 · .deb package (Debian/Ubuntu) | [`dante-babelbox_0.1.1_arm64.deb`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox_0.1.1_arm64.deb) | 4.9 MB |
-| x64 · .rpm package (Fedora/RHEL) | [`dante-babelbox-0.1.1-1.x86_64.rpm`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-1.x86_64.rpm) | 5.0 MB |
-| ARM64 · .rpm package (Fedora/RHEL) | [`dante-babelbox-0.1.1-1.aarch64.rpm`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.1.1/dante-babelbox-0.1.1-1.aarch64.rpm) | 5.1 MB |
+| x64 · .deb package (Debian/Ubuntu) | [`dante-babelbox_0.2.0_amd64.deb`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.2.0/dante-babelbox_0.2.0_amd64.deb) | 4.8 MB |
+| ARM64 · .deb package (Debian/Ubuntu) | [`dante-babelbox_0.2.0_arm64.deb`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.2.0/dante-babelbox_0.2.0_arm64.deb) | 4.9 MB |
+| x64 · .rpm package (Fedora/RHEL) | [`dante-babelbox-0.2.0-1.x86_64.rpm`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.2.0/dante-babelbox-0.2.0-1.x86_64.rpm) | 5.0 MB |
+| ARM64 · .rpm package (Fedora/RHEL) | [`dante-babelbox-0.2.0-1.aarch64.rpm`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/download/v0.2.0/dante-babelbox-0.2.0-1.aarch64.rpm) | 5.0 MB |
 | x64 · .tar.gz archive | [`dante-babelbox-linux-x86_64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-linux-x86_64.tar.gz) | 4.7 MB |
 | ARM64 · .tar.gz archive | [`dante-babelbox-linux-aarch64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-linux-aarch64.tar.gz) | 4.8 MB |
 
