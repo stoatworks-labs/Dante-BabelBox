@@ -41,6 +41,17 @@ set -euo pipefail
 
 RL_NAME=""      # human name, e.g. "SRT Router"
 RL_SLUG=""      # file-safe name, e.g. srt-router
+# What published artefacts are named, when that has to differ from RL_SLUG.
+# Set it via RL_FILE_SLUG, or by a `release-file-slug` file next to the vendored
+# lib; unset, it simply is RL_SLUG and every repo behaves exactly as before.
+#
+# It exists because the two are not the same thing. RL_SLUG is also the Windows
+# uninstall registry key, so renaming a download by changing the slug silently
+# orphans the Add/Remove Programs entry of everyone who already installed —
+# they get a second entry and the first one points at files that were
+# overwritten. WebLinked needed it: its engine ships alongside a launcher that
+# carries the same product name, and the downloads were indistinguishable.
+RL_FILE_SLUG="${RL_FILE_SLUG:-}"
 RL_VERSION=""
 RL_IDENT=""     # reverse-DNS bundle/package identifier
 RL_OUT=""       # directory artefacts land in
@@ -54,6 +65,19 @@ RL_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 rl_init() {
   RL_NAME="$1"; RL_SLUG="$2"; RL_VERSION="$3"; RL_IDENT="$4"; RL_OUT="$5"
+
+  # A repo that publishes under a different name than its slug drops the name in
+  # a file next to the vendored lib, the same way mac-entitlements.plist works
+  # below. A file rather than an argument because a local release of a CMake
+  # project is driven by hand — that is how weblinked's macOS artefacts were
+  # actually built — and anything that has to be remembered on the command line
+  # eventually is not, which would silently publish one platform under the old
+  # name and the rest under the new one.
+  if [[ -z "${RL_FILE_SLUG:-}" && -f "$RL_LIB_DIR/release-file-slug" ]]; then
+    RL_FILE_SLUG="$(tr -d '[:space:]' < "$RL_LIB_DIR/release-file-slug")"
+  fi
+  RL_FILE_SLUG="${RL_FILE_SLUG:-$RL_SLUG}"
+
   mkdir -p "$RL_OUT"
 
   # Machine-local signing configuration. Deliberately a dotfile and not a
@@ -200,7 +224,13 @@ rl_ndi_bundle() { # rl_ndi_bundle <label> <stagedir> [--app <BundleName>]
   fi
 
   src="$(rl_ndi_srcdir "$label")"
-  srcfile="$([[ -n "$src" ]] && rl_ndi_srcfile "$src" "$lib")"
+  # NOT `srcfile="$([[ -n "$src" ]] && ...)"`. Under `set -e` a false `[[ ]]`
+  # makes the whole && list — and so the command substitution — exit non-zero,
+  # which kills the script on the assignment. The skip below then never runs,
+  # and a local release for an NDI-bundling repo dies at the first target whose
+  # runtime is not on this host (Linux/Windows on a Mac) with no message at all.
+  srcfile=""
+  if [[ -n "$src" ]]; then srcfile="$(rl_ndi_srcfile "$src" "$lib")"; fi
 
   if [[ -z "$srcfile" ]]; then
     rl_skip "${label} NDI runtime (set RL_NDI_DIR_$(printf '%s' "$label" | tr '[:lower:]-' '[:upper:]_') to a directory containing ${lib})"
@@ -296,14 +326,14 @@ NDIEULA
 # ---------------------------------------------------------------- archives --
 
 rl_zip() {   # rl_zip <label> <stagedir>
-  local label="$1" stage="$2" f="$RL_OUT/${RL_SLUG}-${RL_VERSION}-${1}.zip"
+  local label="$1" stage="$2" f="$RL_OUT/${RL_FILE_SLUG}-${RL_VERSION}-${1}.zip"
   rl_step "zip  ${label}"
   rm -f "$f"; ( cd "$stage" && zip -qr "$f" . )
   rl_note "$(basename "$f")"
 }
 
 rl_targz() { # rl_targz <label> <stagedir>
-  local label="$1" stage="$2" f="$RL_OUT/${RL_SLUG}-${RL_VERSION}-${1}.tar.gz"
+  local label="$1" stage="$2" f="$RL_OUT/${RL_FILE_SLUG}-${RL_VERSION}-${1}.tar.gz"
   rl_step "tar  ${label}"
   rm -f "$f"; ( cd "$stage" && tar czf "$f" . )
   rl_note "$(basename "$f")"
@@ -577,7 +607,7 @@ rl_nsis() { # rl_nsis <label> <stagedir> --cli | --gui <exe>
 
   local work; work="$(mktemp -d)"
   local nsi="$work/installer.nsi"
-  local outfile="$RL_OUT/${RL_SLUG}-${RL_VERSION}-${label}-setup.exe"
+  local outfile="$RL_OUT/${RL_FILE_SLUG}-${RL_VERSION}-${label}-setup.exe"
 
   # Walk the staging tree and emit File/Delete/RMDir lines in the right order.
   # These accumulate as arrays; joining with printf keeps real newlines in the
@@ -1106,7 +1136,7 @@ rl_pkg() { # rl_pkg <label> <stagedir> --cli | --app <BundleName>
   work="$(mktemp -d)"; root="$work/root"; scripts="$work/scripts"
   mkdir -p "$root" "$scripts"
   component="$work/${RL_SLUG}-component.pkg"
-  outfile="$RL_OUT/${RL_SLUG}-${RL_VERSION}-${label}.pkg"
+  outfile="$RL_OUT/${RL_FILE_SLUG}-${RL_VERSION}-${label}.pkg"
 
   local install_location
   if [[ "$mode" == "--app" ]]; then
@@ -1189,7 +1219,7 @@ rl_pkg_multi() { # rl_pkg_multi <label> <src:dest> ...
   local label="$1"; shift
   rl_step "pkg  ${label} (multi-part)"
   local work; work="$(mktemp -d)"
-  local outfile="$RL_OUT/${RL_SLUG}-${RL_VERSION}-${label}.pkg"
+  local outfile="$RL_OUT/${RL_FILE_SLUG}-${RL_VERSION}-${label}.pkg"
   local -a refs=() lines=()
   local i=0 spec src dest root ident comp
 
@@ -1247,7 +1277,7 @@ rl_pkg_multi() { # rl_pkg_multi <label> <src:dest> ...
 
 rl_dmg() { # rl_dmg <label> <stagedir> [--app <BundleName>]
   local label="$1" stage="$2" mode="${3:-}" appname="${4:-}"
-  local outfile="$RL_OUT/${RL_SLUG}-${RL_VERSION}-${label}.dmg"
+  local outfile="$RL_OUT/${RL_FILE_SLUG}-${RL_VERSION}-${label}.dmg"
   rl_step "dmg  ${label}"
   rm -f "$outfile"
   [[ "$mode" != "--app" ]] && { rl_mac_sign_tree "$stage" || return 1; }
