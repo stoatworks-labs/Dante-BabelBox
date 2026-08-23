@@ -243,7 +243,9 @@ pub fn decode_status(payload: &[u8]) -> Result<Vec<DtPreamp>, DtDecodeError> {
                 });
             }
             Ok(body
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .take(PREAMP_COUNT)
                 .map(|c| DtPreamp::from_flags(gain_from_wire([c[0], c[1]]), c[2]))
                 .collect())

@@ -263,7 +263,9 @@ impl Message {
 
         let address = DeviceAddress::new(bytes[4], bytes[5], bytes[6])?;
         let commands = body
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|c| {
                 let control = Control::from_opcode(c[0]).ok_or(Error::UnknownOpcode(c[0]))?;
                 Command::new(control, c[1], c[2])
