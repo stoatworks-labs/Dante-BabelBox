@@ -132,3 +132,10 @@ panic hook that writes a JSON crash report. Wire it as the **first** thing in `m
 **hold the returned guard** — dropping it (`let _ = diag::init(..)`) silently stops the log
 file being written. Console output goes to stderr; stdout is reserved for program output.
 See [docs/diagnostics.md](docs/diagnostics.md).
+
+## Notes
+
+`docs/NOTES.md` carries this repo's working notes — current status, decisions
+already made, and the traps that have actually bitten. Read it before changing
+anything non-obvious. Cross-cutting fleet knowledge lives in
+[fleet-notes](https://github.com/stoatworks-labs/fleet-notes).
