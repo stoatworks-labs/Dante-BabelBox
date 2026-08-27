@@ -10,5 +10,5 @@ tokio.workspace = true
 async-trait.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
-rosc = "0.10"
+rosc = "0.11"
 socket2 = { version = "0.5", features = ["all"] }
