@@ -44,7 +44,7 @@ pub async fn discover(timeout: Duration) -> anyhow::Result<Vec<DanteDevice>> {
                         debug!(%name, "resolved Dante mDNS service");
                         found.push(DanteDevice {
                             name,
-                            addresses: info.get_addresses().iter().copied().collect(),
+                            addresses: info.addresses.iter().map(|a| a.to_ip_addr()).collect(),
                             port: info.get_port(),
                         });
                     }
