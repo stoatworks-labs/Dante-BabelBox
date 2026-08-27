@@ -43,7 +43,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-axum = { version = "0.8", features = ["ws"] }
+axum = { version = "0.7", features = ["ws"] }
 tower = { version = "0.5", features = ["util"] }
 tokio-util = "0.7"
 abi_stable = "0.11"
