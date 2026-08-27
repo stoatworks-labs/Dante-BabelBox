@@ -346,7 +346,7 @@ async fn push_state(mut socket: WebSocket, state: PatchState) {
             return;
         };
         if last.as_deref() != Some(body.as_str()) {
-            if socket.send(Message::Text(body.clone())).await.is_err() {
+            if socket.send(Message::Text(body.clone().into())).await.is_err() {
                 return;
             }
             last = Some(body);
@@ -369,9 +369,9 @@ pub fn app(state: PatchState) -> AxumRouter {
         .route("/", get(index))
         .route("/api/state", get(get_state))
         .route("/api/devices", post(add_device))
-        .route("/api/devices/:id", delete(remove_device))
+        .route("/api/devices/{id}", delete(remove_device))
         .route("/api/mappings", post(add_mapping))
-        .route("/api/mappings/:id", delete(remove_mapping))
+        .route("/api/mappings/{id}", delete(remove_mapping))
         .route("/ws", get(ws_handler))
         .with_state(state)
 }
