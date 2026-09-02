@@ -687,9 +687,14 @@ SC
   ; Windows system PATH very often exceeds it. Writing "$0;$INSTDIR" on that
   ; empty $0 does not append, it REPLACES the whole system PATH with this one
   ; directory: System32 included, so `ping` and everything else stops
-  ; resolving. That is nib#2. A build machine's PATH is short, which is why it
-  ; survived testing. Never write unless the read demonstrably succeeded and
-  ; came back non-empty.
+  ; resolving. That is nib#2. The PATH on a build machine is short, which is why
+  ; this survived testing. Never write unless the read demonstrably succeeded
+  ; and came back non-empty.
+  ;
+  ; NOTE: keep this block free of apostrophes. It lives in a <<'SC' heredoc
+  ; nested in $( ), and bash 3.2 -- which is what /bin/bash is on GitHub's macOS
+  ; runners -- mis-scans a lone ' there and fails the whole file with a syntax
+  ; error hundreds of lines later. bash 5 parses it fine, so it passes locally.
   ClearErrors
   ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
   IfErrors pathdone
