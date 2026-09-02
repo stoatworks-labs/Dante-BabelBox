@@ -483,9 +483,14 @@ rl_sign_windows() { # rl_sign_windows <stagedir-or-file> [...]
 
 # ------------------------------------------------------------------- NSIS ---
 #
-# Two shapes of Windows installer:
-#   --cli            installs into Program Files and appends to the system PATH
-#   --gui <exe>      the above plus Start Menu and Desktop shortcuts
+# Three shapes of Windows installer:
+#   --plain          installs into Program Files; touches nothing else
+#   --cli            the above plus an append to the system PATH
+#   --gui <exe>      --plain plus Start Menu and Desktop shortcuts
+#
+# Pick --cli only for something the user types at a prompt. A plugin loaded by a
+# host application is --plain: putting it on PATH gains nothing and, before the
+# guard below existed, cost one reporter their entire system PATH (nib#2).
 #
 # Both write an uninstaller and the Add/Remove Programs registry keys. The file
 # list is generated from the staging directory so callers never hand-maintain
@@ -595,7 +600,7 @@ PS1
   printf '%s' "$work/Uninstall.exe"
 }
 
-rl_nsis() { # rl_nsis <label> <stagedir> --cli | --gui <exe>
+rl_nsis() { # rl_nsis <label> <stagedir> --plain | --cli | --gui <exe>
   # RL_EULA (optional, from rl_eula) adds a licence page. Required when the NDI
   # runtime is bundled — that is the condition Vizrt's redistribution grant
   # rests on, so it is not cosmetic.
@@ -650,6 +655,11 @@ rl_nsis() { # rl_nsis <label> <stagedir> --cli | --gui <exe>
   fi
 
   local shortcuts="" unshortcuts="" pathblock="" unpathblock=""
+  # ☠️ This used to be `if --gui ... else <write the system PATH>`, so EVERY mode
+  # that was not --gui got the PATH block — including the ~33 Resolume plugins,
+  # which drop a .dll into a plugin folder and have no business on PATH at all.
+  # That is how nib#2 (a wiped system PATH) reached a user. Modes are explicit
+  # now, and an unknown one is a hard error rather than "probably CLI".
   if [[ "$mode" == "--gui" ]]; then
     shortcuts=$(cat <<SC
   CreateDirectory "\$SMPROGRAMS\\${RL_NAME}"
@@ -663,11 +673,27 @@ SC
   Delete "\$DESKTOP\\${RL_NAME}.lnk"
 SC
 )
-  else
+  elif [[ "$mode" == "--plain" ]]; then
+    # Installs files, an uninstaller and the Add/Remove Programs keys, and
+    # touches nothing else. This is what a plugin wants.
+    :
+  elif [[ "$mode" == "--cli" ]]; then
     # CLI: put the install dir on the machine PATH via EnvVarUpdate-lite.
     pathblock=$(cat <<'SC'
-  ; Append to the system PATH (idempotent: only if not already present)
+  ; Append to the system PATH (idempotent: only if not already present).
+  ;
+  ; ☠️ ReadRegStr returns "" AND sets the error flag when the value is longer
+  ; than NSIS_MAX_STRLEN -- 1024 in the stock makensis build, and a real
+  ; Windows system PATH very often exceeds it. Writing "$0;$INSTDIR" on that
+  ; empty $0 does not append, it REPLACES the whole system PATH with this one
+  ; directory: System32 included, so `ping` and everything else stops
+  ; resolving. That is nib#2. A build machine's PATH is short, which is why it
+  ; survived testing. Never write unless the read demonstrably succeeded and
+  ; came back non-empty.
+  ClearErrors
   ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
+  IfErrors pathdone
+  StrCmp $0 "" pathdone
   Push $0
   Push "$INSTDIR"
   Call StrStr
@@ -678,6 +704,9 @@ SC
   pathdone:
 SC
 )
+  else
+    echo "rl_nsis: unknown mode '${mode}' (expected --cli, --gui <exe>, or --plain)" >&2
+    return 1
   fi
 
   # The uninstall section is assembled separately because the signed-uninstaller
@@ -878,12 +907,58 @@ rl_notary_args() {
 # Helpers/chrome_crashpad_handler in there, and codesign validates
 # subcomponents, so signing the version directory fails with "code object is
 # not signed at all" until that binary is signed first.
+# The JIT exceptions, for a loose binary that needs them. Written once per run,
+# next to the other scratch files.
+rl_jit_entitlements() {
+  local f="${RL_OUT_DIR:-${TMPDIR:-/tmp}}/rl-jit-entitlements.plist"
+  [[ -f "$f" ]] && { printf '%s' "$f"; return 0; }
+  mkdir -p "$(dirname "$f")"
+  cat >"$f" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key><true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+    <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict>
+</plist>
+PLIST
+  printf '%s' "$f"
+}
+
+# Does this loose binary carry a JIT of its own? V8's symbol strings say so for
+# a bundled Node runtime, which is the case that matters here.
+rl_is_jit_binary() { # rl_is_jit_binary <file>
+  # LC_ALL=C: a 100 MB runtime is full of bytes that are not valid UTF-8, and
+  # grep in a UTF-8 locale abandons the whole file rather than the line.
+  LC_ALL=C grep -qa 'v8::internal::' "$1" 2>/dev/null
+}
+
 rl_mac_sign_loose() { # rl_mac_sign_loose <root> [<path-prefix-to-skip>]
-  local root="$1" skip="${2:-}" f
+  local root="$1" skip="${2:-}" f ent
   while IFS= read -r f; do
     [[ -n "$skip" && "$f" == $skip* ]] && continue
     rl_grep 'Mach-O' "$(file -b "$f" 2>/dev/null || true)" || continue
-    codesign --force --options runtime --timestamp \
+    # Entitlements do NOT flow from the enclosing bundle to a binary signed on
+    # its own, and they are read per *process*: a launcher that spawns
+    # Contents/Resources/node gets node's entitlements for that process, not
+    # the app's. So an embedded runtime signed bare aborts on its first JIT
+    # allocation while the app around it verifies and notarises perfectly —
+    # BlackMatrix shipped three releases that way, dying with SIGTRAP before it
+    # could print a line. A JIT-carrying loose binary is signed with the JIT
+    # exceptions: the run's own entitlements when it has some, or the standard
+    # set when it does not.
+    ent=()
+    if rl_is_jit_binary "$f"; then
+      if [[ -n "${RL_MAC_ENTITLEMENTS:-}" && -f "${RL_MAC_ENTITLEMENTS:-}" ]]; then
+        ent=(--entitlements "$RL_MAC_ENTITLEMENTS")
+      else
+        ent=(--entitlements "$(rl_jit_entitlements)")
+      fi
+      rl_note "JIT runtime, entitled: ${f#$root/}"
+    fi
+    codesign --force --options runtime --timestamp ${ent[@]+"${ent[@]}"} \
              --sign "$RL_MAC_SIGN_IDENTITY" "$f" 2>"$RL_CS_ERR" >/dev/null \
       || { echo "codesign failed on nested $f: $(cat "$RL_CS_ERR")" >&2; return 1; }
   done < <(find "$root" \( -type d \( -name '*.app' -o -name '*.framework' \) \) -prune \
@@ -984,6 +1059,40 @@ rl_mac_sign() { # rl_mac_sign <path-to-.app-or-binary>
     # executable on its own makes codesign validate the whole enclosing bundle
     # early — which fails on a PyInstaller app, where Contents/Frameworks holds
     # base_library.zip and codesign treats that as unsigned nested code.
+    #
+    # ...with one exception: a SIDECAR. Tauri's `externalBin` puts helper
+    # binaries in Contents/MacOS alongside the main executable, and the notary
+    # service rejects those — the bundle seal covers them for integrity, but
+    # each is its own Mach-O and needs its own Developer ID signature, hardened
+    # runtime and secure timestamp. Burrow v0.1.0 was refused with exactly
+    # that, three times over, for Contents/MacOS/burrow-helper:
+    #
+    #   The binary is not signed with a valid Developer ID certificate.
+    #   The signature does not include a secure timestamp.
+    #   The executable does not have the hardened runtime enabled.
+    #
+    # Burrow is the fleet's first app with a sidecar, which is why this has
+    # never come up before. The main executable is still left alone, so the
+    # PyInstaller reasoning above is untouched.
+    #
+    # The comparison is exact rather than a prefix: rl_mac_sign_loose's skip
+    # argument is a prefix match, and "$app/Contents/MacOS/burrow" is a prefix
+    # of "burrow-helper" — reusing it here would skip the very binary this
+    # exists to sign.
+    local mainexe sidecar
+    mainexe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
+                 "$app/Contents/Info.plist" 2>/dev/null || true)"
+    if [[ -n "$mainexe" ]]; then
+      while IFS= read -r sidecar; do
+        [[ "$sidecar" == "$app/Contents/MacOS/$mainexe" ]] && continue
+        rl_grep 'Mach-O' "$(file -b "$sidecar" 2>/dev/null || true)" || continue
+        rl_note "sidecar: ${sidecar#$app/}"
+        codesign --force --options runtime --timestamp \
+                 --sign "$RL_MAC_SIGN_IDENTITY" "$sidecar" \
+                 2>"$RL_CS_ERR" >/dev/null \
+          || { echo "codesign failed on sidecar $sidecar: $(cat "$RL_CS_ERR")" >&2; return 1; }
+      done < <(find "$app/Contents/MacOS" -maxdepth 1 -type f 2>/dev/null | sort)
+    fi
   fi
   # ${a[@]+"${a[@]}"}: bash 3.2 — still /bin/bash on macOS, and what launchd
   # runs — treats "${a[@]}" on an EMPTY array as an unbound variable under
