@@ -45,7 +45,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use dante_babelbox_core::{
-    AdapterError, AdapterResult, DeviceAdapter, DeviceInfo, PreampAddress, PreampEvent, PreampState,
+    ChangedFields, AdapterError, AdapterResult, DeviceAdapter, DeviceInfo, PreampAddress, PreampEvent, PreampState,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedWriteHalf;
@@ -420,25 +420,37 @@ async fn handle_message(
         return;
     };
 
-    let new_state = {
+    let (new_state, changed) = {
         let mut guard = state.lock().await;
         let entry = guard.entry(channel).or_insert(PreampState {
             gain_db: 0.0,
             phantom: false,
             pad: None,
         });
-        match update {
-            Update::Gain(v) => entry.gain_db = v,
-            Update::Phantom(v) => entry.phantom = v,
-            Update::Pad(v) => entry.pad = Some(v),
-        }
-        *entry
+        // The message names ONE field. The rest of `entry` is carried context,
+        // and on first contact it is the default rather than a reading.
+        let changed = match update {
+            Update::Gain(v) => {
+                entry.gain_db = v;
+                ChangedFields::GAIN
+            }
+            Update::Phantom(v) => {
+                entry.phantom = v;
+                ChangedFields::PHANTOM
+            }
+            Update::Pad(v) => {
+                entry.pad = Some(v);
+                ChangedFields::PAD
+            }
+        };
+        (*entry, changed)
     };
 
     debug!(device = %id, channel, ?update, "dLive preamp update");
     let _ = tx.send(PreampEvent {
         address: PreampAddress::new(id.to_string(), channel),
         state: new_state,
+        changed,
     });
 }
 

@@ -51,7 +51,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use dante_babelbox_core::{
-    AdapterError, AdapterResult, DeviceAdapter, DeviceInfo, PreampAddress, PreampEvent, PreampState,
+    ChangedFields, AdapterError, AdapterResult, DeviceAdapter, DeviceInfo, PreampAddress, PreampEvent, PreampState,
 };
 use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, Mutex};
@@ -410,6 +410,14 @@ async fn apply_block(
         let Some(gains) = snapshot.gain_db else {
             continue;
         };
+        // `phantom` falls back to false when the snapshot has never carried
+        // it — that is a placeholder, not a reading, so say so rather than
+        // relaying it and switching 48 V off on the mapped peer.
+        let changed = ChangedFields {
+            gain: true,
+            phantom: snapshot.phantom.is_some(),
+            pad: false,
+        };
         let _ = tx.send(PreampEvent {
             address: PreampAddress::new(id.to_string(), idx as u16 + 1),
             state: PreampState {
@@ -417,6 +425,7 @@ async fn apply_block(
                 phantom: snapshot.phantom.map(|p| p[idx]).unwrap_or(false),
                 pad: None,
             },
+            changed,
         });
     }
 }

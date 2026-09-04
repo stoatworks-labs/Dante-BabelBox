@@ -28,23 +28,36 @@ use crate::adapter::DeviceAdapter;
 use crate::channel_scheme::{self, Field};
 use crate::types::PreampEvent;
 
+/// One OCA event per field the device actually reported — never per field the
+/// `PreampState` happens to hold.
+///
+/// This used to emit Gain AND Phantom for every event regardless. Since the
+/// unreported half of the struct is the default on first contact, a gain
+/// message relayed `Phantom = false` to the mapped peer and a phantom message
+/// relayed `Gain = 0.0 dB`. See [`ChangedFields`].
 fn preamp_event_to_oca_ffi(device_id: &str, event: PreampEvent) -> Vec<OcaEventFfi> {
     let channel = event.address.channel;
-    let mut out = vec![
-        OcaEventFfi::from_event(
-            device_id,
-            OcaObject::from_descriptor(channel_scheme::descriptor(channel, Field::Gain), OcaValue::F32(event.state.gain_db)),
-        ),
-        OcaEventFfi::from_event(
-            device_id,
-            OcaObject::from_descriptor(channel_scheme::descriptor(channel, Field::Phantom), OcaValue::Bool(event.state.phantom)),
-        ),
-    ];
-    if let Some(pad) = event.state.pad {
+    let mut out = Vec::new();
+
+    if event.changed.gain {
         out.push(OcaEventFfi::from_event(
             device_id,
-            OcaObject::from_descriptor(channel_scheme::descriptor(channel, Field::Pad), OcaValue::Bool(pad)),
+            OcaObject::from_descriptor(channel_scheme::descriptor(channel, Field::Gain), OcaValue::F32(event.state.gain_db)),
         ));
+    }
+    if event.changed.phantom {
+        out.push(OcaEventFfi::from_event(
+            device_id,
+            OcaObject::from_descriptor(channel_scheme::descriptor(channel, Field::Phantom), OcaValue::Bool(event.state.phantom)),
+        ));
+    }
+    if event.changed.pad {
+        if let Some(pad) = event.state.pad {
+            out.push(OcaEventFfi::from_event(
+                device_id,
+                OcaObject::from_descriptor(channel_scheme::descriptor(channel, Field::Pad), OcaValue::Bool(pad)),
+            ));
+        }
     }
     out
 }
@@ -182,7 +195,7 @@ impl PluginAdapter for LegacyPluginBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::PreampAddress;
+    use crate::types::{ChangedFields, PreampAddress};
     use crate::types::PreampState;
     use async_trait::async_trait;
     use std::collections::HashMap;
@@ -279,34 +292,84 @@ mod tests {
         assert!(matches!(bridge.set_object(pad_ono, OcaValueFfi::Bool(true)), RResult::RErr(_)));
     }
 
+    /// Collect (gain, phantom) as seen on the bridge's event stream.
+    fn drain(bridge: &mut LegacyPluginBridge, channel: u16) -> (Option<OcaValueFfi>, Option<OcaValueFfi>) {
+        let (mut gain, mut phantom) = (None, None);
+        for _ in 0..50 {
+            for event in Vec::from(bridge.poll_events()) {
+                if event.ono == u32::from(channel_scheme::gain_ono(channel)) {
+                    gain = Some(event.value.clone());
+                }
+                if event.ono == u32::from(channel_scheme::phantom_ono(channel)) {
+                    phantom = Some(event.value.clone());
+                }
+            }
+            if gain.is_some() && phantom.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        (gain, phantom)
+    }
+
+    /// A gain message must not carry a phantom value with it.
+    ///
+    /// This used to emit both unconditionally. The phantom half of a
+    /// PreampState is whatever was last known and, on first contact, the
+    /// default `false` — so relaying it dropped 48 V on the mapped peer
+    /// because someone nudged a gain knob on a channel whose phantom had never
+    /// been read. On a live condenser that is the microphone going off.
     #[test]
-    fn subscribe_translates_one_preamp_event_into_gain_and_phantom_events() {
+    fn a_gain_only_event_does_not_also_report_phantom() {
+        let (adapter, tx, _gain_calls) = mock();
+        let mut bridge = LegacyPluginBridge::new(Box::new(adapter), 4);
+
+        tx.send(PreampEvent {
+            address: PreampAddress::new("d", 3),
+            // phantom:false here is the DEFAULT, not a reading.
+            state: PreampState { gain_db: 1.5, phantom: false, pad: None },
+            changed: ChangedFields::GAIN,
+        })
+        .unwrap();
+
+        let (gain, phantom) = drain(&mut bridge, 3);
+        assert_eq!(gain, Some(OcaValueFfi::F32(1.5)));
+        assert_eq!(phantom, None, "a gain message must not push a phantom value");
+    }
+
+    /// And the reverse: toggling 48 V must not relay Gain = 0.0 dB.
+    #[test]
+    fn a_phantom_only_event_does_not_also_report_gain() {
+        let (adapter, tx, _gain_calls) = mock();
+        let mut bridge = LegacyPluginBridge::new(Box::new(adapter), 4);
+
+        tx.send(PreampEvent {
+            address: PreampAddress::new("d", 3),
+            state: PreampState { gain_db: 0.0, phantom: true, pad: None },
+            changed: ChangedFields::PHANTOM,
+        })
+        .unwrap();
+
+        let (gain, phantom) = drain(&mut bridge, 3);
+        assert_eq!(phantom, Some(OcaValueFfi::Bool(true)));
+        assert_eq!(gain, None, "a phantom message must not push a gain value");
+    }
+
+    /// A snapshot that genuinely read both still reports both.
+    #[test]
+    fn an_event_carrying_both_fields_reports_both() {
         let (adapter, tx, _gain_calls) = mock();
         let mut bridge = LegacyPluginBridge::new(Box::new(adapter), 4);
 
         tx.send(PreampEvent {
             address: PreampAddress::new("d", 3),
             state: PreampState { gain_db: 1.5, phantom: true, pad: None },
+            changed: ChangedFields::ALL,
         })
         .unwrap();
 
-        let mut last_gain = None;
-        let mut last_phantom = None;
-        for _ in 0..50 {
-            for event in Vec::from(bridge.poll_events()) {
-                if event.ono == u32::from(channel_scheme::gain_ono(3)) {
-                    last_gain = Some(event.value.clone());
-                }
-                if event.ono == u32::from(channel_scheme::phantom_ono(3)) {
-                    last_phantom = Some(event.value.clone());
-                }
-            }
-            if last_gain.is_some() && last_phantom.is_some() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert_eq!(last_gain, Some(OcaValueFfi::F32(1.5)));
-        assert_eq!(last_phantom, Some(OcaValueFfi::Bool(true)));
+        let (gain, phantom) = drain(&mut bridge, 3);
+        assert_eq!(gain, Some(OcaValueFfi::F32(1.5)));
+        assert_eq!(phantom, Some(OcaValueFfi::Bool(true)));
     }
 }

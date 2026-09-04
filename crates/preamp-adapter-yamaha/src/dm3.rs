@@ -36,7 +36,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use dante_babelbox_core::{
-    AdapterError, AdapterResult, DeviceAdapter, DeviceInfo, PreampAddress, PreampEvent, PreampState,
+    ChangedFields, AdapterError, AdapterResult, DeviceAdapter, DeviceInfo, PreampAddress, PreampEvent, PreampState,
 };
 use rosc::{OscMessage, OscPacket, OscType};
 use tokio::net::UdpSocket;
@@ -303,24 +303,32 @@ async fn handle_message(
         return;
     };
 
-    let new_state = {
+    let (new_state, changed) = {
         let mut guard = state.lock().await;
         let entry = guard.entry(channel).or_insert(PreampState {
             gain_db: 0.0,
             phantom: false,
             pad: None,
         });
-        match field {
-            HeadampField::Gain => entry.gain_db = value as f32,
-            HeadampField::Phantom => entry.phantom = value != 0,
-        }
-        *entry
+        // One field per message; see ChangedFields.
+        let changed = match field {
+            HeadampField::Gain => {
+                entry.gain_db = value as f32;
+                ChangedFields::GAIN
+            }
+            HeadampField::Phantom => {
+                entry.phantom = value != 0;
+                ChangedFields::PHANTOM
+            }
+        };
+        (*entry, changed)
     };
 
     debug!(device = %id, channel, ?field, value, "DM3 headamp update");
     let _ = tx.send(PreampEvent {
         address: PreampAddress::new(id.to_string(), channel),
         state: new_state,
+        changed,
     });
 }
 

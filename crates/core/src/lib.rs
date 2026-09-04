@@ -15,4 +15,4 @@ pub use legacy_plugin_bridge::LegacyPluginBridge;
 pub use local_adapter::LocalAdapter;
 pub use plugin_registry::PluginRegistry;
 pub use router::{Mapping, Router};
-pub use types::{PreampAddress, PreampEvent, PreampState};
+pub use types::{ChangedFields, PreampAddress, PreampEvent, PreampState};

@@ -128,17 +128,26 @@ impl X32PluginAdapter {
                     Ok(event) => {
                         let channel = event.address.channel;
                         let mut queue = events_for_task.lock().unwrap();
-                        queue.push_back(OcaEventFfi::from_event(
-                            device_id.clone(),
-                            OcaObject::from_descriptor(descriptor(channel, true), OcaValue::F32(event.state.gain_db)),
-                        ));
-                        queue.push_back(OcaEventFfi::from_event(
-                            device_id.clone(),
-                            OcaObject::from_descriptor(
-                                descriptor(channel, false),
-                                OcaValue::Bool(event.state.phantom),
-                            ),
-                        ));
+                        // Only the field the device actually reported. Emitting
+                        // both unconditionally pushed the OTHER field's default
+                        // to the mapped peer — a gain knob dropping 48 V, or a
+                        // phantom toggle slamming gain to 0 dB. See
+                        // ChangedFields in dante_babelbox_core.
+                        if event.changed.gain {
+                            queue.push_back(OcaEventFfi::from_event(
+                                device_id.clone(),
+                                OcaObject::from_descriptor(descriptor(channel, true), OcaValue::F32(event.state.gain_db)),
+                            ));
+                        }
+                        if event.changed.phantom {
+                            queue.push_back(OcaEventFfi::from_event(
+                                device_id.clone(),
+                                OcaObject::from_descriptor(
+                                    descriptor(channel, false),
+                                    OcaValue::Bool(event.state.phantom),
+                                ),
+                            ));
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -379,12 +388,16 @@ mod tests {
 
         // Drain poll_events over a short window and track the *last* value
         // seen per ono. `X32Adapter` broadcasts one `PreampEvent` per
-        // incoming OSC message, each carrying the *whole* channel state -
-        // so the gain-changed message (arriving before phantom is known)
-        // produces a transient phantom=false event alongside the real
-        // gain=-6.0 one, settling to phantom=true only once the second
-        // message lands. That transient is expected, not a bug - only the
-        // final, settled value matters here.
+        // incoming OSC message, each carrying the whole channel state — but
+        // the event says which field it actually OBSERVED, and only that is
+        // emitted. The gain message, arriving before phantom has ever been
+        // read, therefore produces a gain event and nothing else.
+        //
+        // It used to emit a transient phantom=false alongside it, and this
+        // comment used to call that expected. It is not: the Router forwards
+        // every field of every event to the mapped peer, so that transient was
+        // a real `Phantom=false` write to another device — 48 V dropping on a
+        // live condenser because someone moved a gain knob. See ChangedFields.
         let mut last_gain = None;
         let mut last_phantom = None;
         for _ in 0..50 {
