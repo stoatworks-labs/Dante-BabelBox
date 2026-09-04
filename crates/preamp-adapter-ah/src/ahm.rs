@@ -36,7 +36,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use dante_babelbox_core::{
-    AdapterError, AdapterResult, DeviceAdapter, DeviceInfo, PreampAddress, PreampEvent, PreampState,
+    ChangedFields, AdapterError, AdapterResult, DeviceAdapter, DeviceInfo, PreampAddress, PreampEvent, PreampState,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedWriteHalf;
@@ -366,26 +366,37 @@ fn spawn_receive_loop(
                 }
                 let channel = ch as u16 + 1;
 
-                let new_state = {
+                let (new_state, changed) = {
                     let mut guard = state.lock().await;
                     let entry = guard.entry(channel).or_insert(PreampState {
                         gain_db: 0.0,
                         phantom: false,
                         pad: None,
                     });
-                    match param {
-                        PARAM_GAIN => entry.gain_db = gain_byte_to_db(value),
-                        PARAM_PAD => entry.pad = Some(byte_to_bool(value)),
-                        PARAM_PHANTOM => entry.phantom = byte_to_bool(value),
+                    // One parameter per message; see ChangedFields.
+                    let changed = match param {
+                        PARAM_GAIN => {
+                            entry.gain_db = gain_byte_to_db(value);
+                            ChangedFields::GAIN
+                        }
+                        PARAM_PAD => {
+                            entry.pad = Some(byte_to_bool(value));
+                            ChangedFields::PAD
+                        }
+                        PARAM_PHANTOM => {
+                            entry.phantom = byte_to_bool(value);
+                            ChangedFields::PHANTOM
+                        }
                         _ => unreachable!(),
-                    }
-                    *entry
+                    };
+                    (*entry, changed)
                 };
 
                 debug!(device = %id, channel, param, value, "AHM preamp update");
                 let _ = tx.send(PreampEvent {
                     address: PreampAddress::new(id.to_string(), channel),
                     state: new_state,
+                    changed,
                 });
             }
         }
