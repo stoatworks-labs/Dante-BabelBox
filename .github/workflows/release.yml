@@ -24,15 +24,20 @@ jobs:
           - { name: linux-aarch64,   os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu,  pkgarch: arm64 }
           - { name: windows-x86_64,  os: windows-latest,   target: x86_64-pc-windows-msvc }
           - { name: windows-aarch64, os: windows-11-arm,   target: aarch64-pc-windows-msvc }
-          - { name: macos-x86_64,    os: macos-14,         target: x86_64-apple-darwin }
-          - { name: macos-aarch64,   os: macos-14,         target: aarch64-apple-darwin }
+          # Both arches already built on this one runner, so they are merged
+          # into a single universal binary rather than published as two
+          # downloads. `target2` is the second triple to build and lipo in; it
+          # exists only on this row. universal-apple-darwin is a Tauri bundling
+          # target, not a cargo one, so unlike the launcher repos this cannot be
+          # expressed by changing `target` — cargo would reject it.
+          - { name: macos-universal, os: macos-14,         target: aarch64-apple-darwin, target2: x86_64-apple-darwin }
     steps:
       - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target2 && format('{0},{1}', matrix.target, matrix.target2) || matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -51,6 +56,10 @@ jobs:
       - name: Build (release)
         run: cargo build --release --target ${{ matrix.target }} --bins
 
+      - name: Build (release, second macOS arch)
+        if: matrix.target2 != ''
+        run: cargo build --release --target ${{ matrix.target2 }} --bins
+
       - name: Stage binaries
         shell: bash
         env:
@@ -59,9 +68,37 @@ jobs:
           mkdir -p dist
           ext=""
           [[ "${{ matrix.target }}" == *windows* ]] && ext=".exe"
+          t2="${{ matrix.target2 }}"
           for b in $BINS; do
-            cp "target/${{ matrix.target }}/release/${b}${ext}" "dist/${b}${ext}"
+            if [ -n "$t2" ]; then
+              # One binary that runs on both Macs, instead of one download each.
+              lipo -create \
+                "target/${{ matrix.target }}/release/${b}" \
+                "target/$t2/release/${b}" \
+                -output "dist/${b}"
+            else
+              cp "target/${{ matrix.target }}/release/${b}${ext}" "dist/${b}${ext}"
+            fi
           done
+          # Assert it, do not assume it: a lipo that silently produced a thin
+          # binary would ship as "universal" and fail on half the Macs that
+          # downloaded it. Captured and matched with `case`, never piped into
+          # grep -- under `bash -eo pipefail` grep exiting on its first match
+          # SIGPIPEs the writer and fails the step BECAUSE the match was found.
+          if [ -n "$t2" ]; then
+            for b in $BINS; do
+              __archs="$( lipo -archs "dist/${b}" )"
+              echo "dist/${b}: $__archs"
+              case "$__archs" in
+                *arm64*) ;;
+                *) echo "expected an arm64 slice in $b, got: $__archs" >&2; exit 1 ;;
+              esac
+              case "$__archs" in
+                *x86_64*) ;;
+                *) echo "expected an x86_64 slice in $b, got: $__archs" >&2; exit 1 ;;
+              esac
+            done
+          fi
           ls -la dist
 
       - name: Package .deb and .rpm (Linux only)
