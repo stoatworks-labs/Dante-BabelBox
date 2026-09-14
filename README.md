@@ -63,8 +63,8 @@ flowchart LR
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Apple Silicon · .tar.gz archive | [`dante-babelbox-macos-aarch64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-macos-aarch64.tar.gz) | 4.3 MB |
-| Intel · .tar.gz archive | [`dante-babelbox-macos-x86_64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-macos-x86_64.tar.gz) | 4.4 MB |
+| Apple Silicon · .tar.gz archive | [`dante-babelbox-macos-aarch64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-macos-aarch64.tar.gz) | 4.2 MB |
+| Intel · .tar.gz archive | [`dante-babelbox-macos-x86_64.tar.gz`](https://github.com/stoatworks-labs/Dante-BabelBox/releases/latest/download/dante-babelbox-macos-x86_64.tar.gz) | 4.5 MB |
 
 </details>
 
