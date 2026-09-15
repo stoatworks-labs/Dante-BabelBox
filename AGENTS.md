@@ -60,9 +60,19 @@ TCP to real devices. Only `plugin-aes70` uses it.
 
 These are in the README as user-facing warnings and must not be quietly softened:
 
-**No adapter has been validated against real hardware.** Every adapter is tested against mock
-devices in the test suite only. Say "no adapter has been validated", not "nothing has been
-validated" — the distinction now matters, see below.
+**Almost no adapter has been validated against real hardware** — every adapter is tested
+against mock devices in the test suite, and only **one** has also been run against a real
+device (the DM3, below). Say "almost no adapter has been validated", not "nothing has been
+validated" — the distinction now matters twice over, see below.
+
+**The Yamaha DM3 adapter *has* been run against a real DM3** (V3.00, 2026-09-15) — the first
+adapter *code* proven on hardware here. `Dm3Adapter` identify / get_state / set_gain /
+set_phantom all worked against the console, writes included, confirmed by the desk's own
+change notifications. Keep this precise: it is the **OSC** adapter that ran, and the session
+proved OSC is the *weaker* transport (no push, stale read-after-write) — so the write-up
+([`docs/yamaha-dm3-bench-2026-09-15.md`](docs/yamaha-dm3-bench-2026-09-15.md)) recommends a
+future SCP adapter. Don't inflate this into "the DM3 is done over SCP" — no SCP adapter
+exists yet. The DM3's SCP protocol is *characterised* (that doc), not *implemented*.
 
 **The Yamaha R-series HA protocol *has* been proven on real hardware**, and this is the one
 place the honesty warning got *stronger* rather than weaker. It was captured from a real
