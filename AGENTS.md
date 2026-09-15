@@ -65,14 +65,17 @@ against mock devices in the test suite, and only **one** has also been run again
 device (the DM3, below). Say "almost no adapter has been validated", not "nothing has been
 validated" — the distinction now matters twice over, see below.
 
-**The Yamaha DM3 adapter *has* been run against a real DM3** (V3.00, 2026-09-15) — the first
-adapter *code* proven on hardware here. `Dm3Adapter` identify / get_state / set_gain /
-set_phantom all worked against the console, writes included, confirmed by the desk's own
-change notifications. Keep this precise: it is the **OSC** adapter that ran, and the session
-proved OSC is the *weaker* transport (no push, stale read-after-write) — so the write-up
-([`docs/yamaha-dm3-bench-2026-09-15.md`](docs/yamaha-dm3-bench-2026-09-15.md)) recommends a
-future SCP adapter. Don't inflate this into "the DM3 is done over SCP" — no SCP adapter
-exists yet. The DM3's SCP protocol is *characterised* (that doc), not *implemented*.
+**The Yamaha DM3 is a fully hardware-validated target** (V3.00, 2026-09-15) — the first and
+so far only adapter with *every method* proven on a real console. The validated path is the
+**SCP adapter** `Dm3ScpAdapter` (`crates/preamp-adapter-yamaha/src/dm3_scp.rs`, kind
+`yamaha-dm3-scp`, TCP 49280): identify, get_state, set_gain, set_phantom and a live
+`subscribe()` change feed (driven by the DM3's `NOTIFY` push) all ran against the desk,
+through the full plugin stack. The older **OSC** adapter `Dm3Adapter` (kind `yamaha-dm3`,
+UDP 49900) also ran but is weaker — OSC `set` is unacknowledged and the DM3 pushes no
+unsolicited OSC, so read-after-write and `subscribe()` don't work as well. Keep the two
+straight when editing: **SCP is the validated, recommended transport; OSC is the legacy one.**
+Both are real, hardware-run adapters; neither is a mock. See
+[`docs/yamaha-dm3-bench-2026-09-15.md`](docs/yamaha-dm3-bench-2026-09-15.md).
 
 **The Yamaha R-series HA protocol *has* been proven on real hardware**, and this is the one
 place the honesty warning got *stronger* rather than weaker. It was captured from a real
@@ -80,7 +83,8 @@ QL1 + Rio3224-D2, decoded, written up as
 [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md), then rebuilt
 from that document and transmitted — the stagebox accepted it and changed its gain. Keep the
 line sharp when editing: **the protocol is verified, the code is not.** The write came from a
-standalone Python script; `preamp-adapter-yamaha` still only covers DM3 over OSC and has no
+standalone Python script; `preamp-adapter-yamaha` covers the DM3 (OSC `Dm3Adapter` and the
+hardware-validated SCP `Dm3ScpAdapter`) but has no
 Rio support at all. Anyone implementing Rio HA is working from evidence, not guesswork — that
 is the claim, and it should not be inflated into "the Yamaha adapter works".
 

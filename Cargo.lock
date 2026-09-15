@@ -538,6 +538,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante-babelbox-plugin-yamaha-dm3-scp"
+version = "0.2.0"
+dependencies = [
+ "abi_stable",
+ "dante-babelbox-core",
+ "dante-babelbox-oca-plugin-abi",
+ "dante-babelbox-preamp-adapter-yamaha",
+ "tokio",
+]
+
+[[package]]
 name = "dante-babelbox-preamp-adapter-ah"
 version = "0.2.0"
 dependencies = [

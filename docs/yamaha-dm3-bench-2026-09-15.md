@@ -390,8 +390,12 @@ bridge.
   needs a Rio, so this is properly blocked on hardware, not on more guessing.
 - ~~DM3 Editor online: capture the Editor's sync protocol~~ **done** (§7b): MMS
   over TCP 50368; blocked only by R Remote holding UDP 54330, not by the network.
-- A `yamaha-scp` adapter (TCP 49280): the DM3 is a complete, hardware-validated
-  target for it today — read, write, scenes and `NOTIFY` are all proven above.
+- ~~A `yamaha-scp` adapter (TCP 49280)~~ **shipped** (2026-09-15): `Dm3ScpAdapter`
+  + `plugin-yamaha-dm3-scp` (kind `yamaha-dm3-scp`). identify / get_state /
+  set_gain / set_phantom / `subscribe` all validated on the real DM3 through the
+  full plugin stack — the first fully hardware-proven adapter in the project.
+  (Scene recall/store over SCP is proven on the wire but not yet a bridge feature;
+  the bridge's model is preamp gain/phantom, not scene control.)
 - Mount a faked Rio on the DM3's I/O device screen: does the console emit MBC
   pairing queries (§6)?
 - A write test with the user's consent: `set IO:Current/InCh/HAGain` on a spare
