@@ -134,6 +134,7 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 | Yamaha | Rio, Tio (R-series) | `MBC` over Audinate ConMon | Implemented — gain, +48 V and metering, from a wire format [captured and proven on real hardware](docs/yamaha-ha-remote-over-dante.md). Never run against a device. |
 | *Any AES70 vendor* | Focusrite RedNet (MP8R and any unit with AES70 enabled); expected to reach Bosch/Dynacord OMNEO and d&b without new code | AES70/OCA (OCP.1 over TCP) | Implemented from the **published standard** — no reverse engineering, and not vendor-specific. The device's objects, classes and names are discovered at runtime, so there is no vendor ONo map to be wrong. Never run against any AES70 device; see the plugin's module comment for the two things to check first. |
 | Aphex | 1788A | Parametric MIDI SysEx | **Codec only, no transport.** The byte string is built and parsed from Aphex's published command table (gain, phantom, pad, polarity, mute, low cut, limiter — more of this project's model than any other device here). Nothing sends it yet: the table is the MIDI layer, and how SysEx reaches the unit's Ethernet port isn't documented. See the crate's module comment |
+| Sennheiser | evolution wireless G3 (EM 300/500 G3) | **binary WSM protocol** (UDP 8133) | **Validated end-to-end on a real EM 500 G3** (2026-09-15): a DM3's remote head-amp gain drove the receiver's analog **AF-out level** through the bridge, confirmed on the hardware. Kind `sennheiser-ewg3`, one channel, gain = AF-out (−24…+18 dB, 3 dB steps). Reverse-engineered from Wireless Systems Manager — **not** the documented ASCII protocol (TI 1254, UDP 53212), which this receiver does not answer. Close WSM before bridging: it holds the receiver's single write-master slot. See [docs/sennheiser-ewg3-bench-2026-09-15.md](docs/sennheiser-ewg3-bench-2026-09-15.md) |
 
 Every "Done" adapter is built from an official vendor spec (or, for the
 X32 family, the long-established community reference), not guesswork, and
@@ -193,9 +194,11 @@ crates/
 ├── plugin-dlive-tcp/             # dLive plugin (thin wrapper over LegacyPluginBridge)
 ├── plugin-yamaha-dm3/            # DM3 plugin, OSC transport (thin wrapper over LegacyPluginBridge)
 ├── plugin-yamaha-dm3-scp/        # DM3 plugin, SCP transport — the hardware-validated one (thin wrapper)
+├── plugin-sennheiser-ewg3/       # Sennheiser G3 receiver plugin (thin wrapper over LegacyPluginBridge)
 ├── preamp-adapter-osc/         # X32/Wing OSC wire-protocol logic, reused by the two plugins above
 ├── preamp-adapter-ah/          # AHM/dLive wire-protocol logic, reused by the two plugins above
 ├── preamp-adapter-yamaha/      # DM3 (OSC `Dm3Adapter` + SCP `Dm3ScpAdapter`) and R-series MBC wire logic
+├── preamp-adapter-sennheiser-ewg3/  # Sennheiser evolution-wireless G3 (AF-out as gain) over the binary WSM protocol, UDP 8133
 ├── preamp-web/                 # Patch-bay web UI + device/mapping management API (axum)
 └── preamp-cli/                 # `preamp-bridge` binary: discover, init, run, config, hot-reload
 ```
@@ -212,14 +215,15 @@ full picture, and
 [`docs/plugin-development-guide.md`](docs/plugin-development-guide.md)
 for how to add a new device as a loadable plugin.
 
-All five preamp vendors ship as real dynamically-loaded plugins - X32's
+All preamp vendors ship as real dynamically-loaded plugins - X32's
 FFI translation is hand-written (it was this project's original
 proof-of-concept, predating the generic wrapper below); Wing, AHM,
-dLive, and DM3 are thin crates built on `core::LegacyPluginBridge`, which
-generically wraps the older in-process `DeviceAdapter` trait (connect,
-set_gain, set_phantom, get_state, subscribe) so their existing,
-already-tested wire-protocol code didn't need rewriting to become a real
-plugin - only a `create_adapter`/`plugin_info` pair per vendor.
+dLive, DM3, and the Sennheiser G3 are thin crates built on
+`core::LegacyPluginBridge`, which generically wraps the older in-process
+`DeviceAdapter` trait (connect, set_gain, set_phantom, get_state,
+subscribe) so their existing, already-tested wire-protocol code didn't
+need rewriting to become a real plugin - only a
+`create_adapter`/`plugin_info` pair per vendor.
 
 ## Plugin Architecture
 
@@ -235,7 +239,7 @@ to the `Router` and the web UI:
   loaded at runtime via [`abi_stable`](https://docs.rs/abi_stable). Adding
   a new vendor this way needs **no recompile of this project at all** —
   build your plugin, drop the file in the plugins directory, restart the
-  bridge. All six real preamp vendors work this way today.
+  bridge. Every real preamp vendor works this way today.
 
 ```mermaid
 flowchart LR

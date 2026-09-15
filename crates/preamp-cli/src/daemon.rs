@@ -313,6 +313,8 @@ mod tests {
                 "osc-wing",
                 "osc-x32",
                 "rednet-aes70",
+                // Sennheiser evolution-wireless G3 receiver (AF-out as gain).
+                "sennheiser-ewg3",
                 "yamaha",
                 // The DM3 ships two plugins: OSC (`yamaha-dm3`) and the
                 // hardware-validated SCP transport (`yamaha-dm3-scp`).
