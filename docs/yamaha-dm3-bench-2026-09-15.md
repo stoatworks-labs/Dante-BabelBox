@@ -382,6 +382,39 @@ next step; the 50368 MMS protocol is a heavier lift (full binary framework) and
 only worth it for whole-console mirroring, which is out of scope for a preamp
 bridge.
 
+## 7c. The Router validated on hardware (added 2026-09-15, later session)
+
+With open bench access, the **bridge's actual function** — the `Router` reading a
+change on one device and applying it to a mapped peer — was exercised against the
+real DM3 for the first time (previously only mock-tested). Two `yamaha-dm3-scp`
+devices were pointed at the same console (`dm3-a`, `dm3-b`) so a mapping could be
+driven with one physical desk, all on spare channels (9–16, no source, show
+channels and the stereo master untouched).
+
+- **Unidirectional map `dm3-a:9 → dm3-b:10`:** setting ch 9 to 18 (from a separate
+  SCP client) propagated to ch 10 within ~1 s — the Router consumed the `NOTIFY`
+  on dm3-a, mapped it, and wrote dm3-b. Clean: one resulting `set`. This is the
+  first time the Router (not just an adapter method) moved a value across a
+  mapping on real hardware.
+- **Bidirectional map `ch11 ↔ ch12`:** both directions propagate (ch11→22 pulled
+  ch12 to 22; ch12→33 pulled ch11 to 33) and the values **converge and settle**
+  (stable across repeated reads; steady state is 0 further `set`s — the storm
+  self-terminates).
+- **But** that bidirectional case showed **echo amplification**: ~42 `set`
+  commands for 2 user actions, bouncing ~10 rounds before settling. The cause is
+  the test topology, not deployment — both adapters connect to the **same**
+  physical console, so each hears the other's `NOTIFY`s, which is what closes the
+  loop. Two *distinct* devices (the real use case) can't form it: a device's
+  `NOTIFY` only reaches its own adapter, and that adapter's echo suppression drops
+  its own confirmation. Still worth tightening the suppression window so the
+  adversarial case converges in one round rather than ten — logged as a follow-up.
+- **Gain clamping matches:** the DM3 clamps `HAGain` to 0–64 itself (65/70/100 →
+  64, −5 → 0), exactly the adapter's clamp, and signals a clamped write with an
+  **`OKm`** reply prefix (vs plain `OK`) — "value modified." The adapter parses
+  `OKm` fine (it keys on the address token) and clamps before sending regardless.
+- All 16 inputs read correctly; spare channels 9–16 were write-proven and
+  restored to baseline. No show channel or the stereo master was touched.
+
 ## 8. Still to do with this console
 
 - The fake Rio did not get R Remote to connect (§2). If revisited: alias IP on
