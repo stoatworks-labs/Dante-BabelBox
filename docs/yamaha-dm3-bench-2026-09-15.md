@@ -415,6 +415,25 @@ channels and the stereo master untouched).
 - All 16 inputs read correctly; spare channels 9–16 were write-proven and
   restored to baseline. No show channel or the stereo master was touched.
 
+A later session with full desk access (the console was being de-rigged) added:
+
+- **The patch-bay web UI drove real hardware.** `preamp-bridge run --web-bind`
+  with two `yamaha-dm3-scp` devices rendered both real consoles and their 16
+  channels; a mapping **added through the web API** (`POST /api/mappings`,
+  console:1 → monitors:9) then propagated a gain change to the desk (ch1→40 pulled
+  ch9→40). So the whole chain — web UI/API → Router → SCP adapter → console —
+  works end to end on hardware, not just the CLI.
+- **The bridge is source-agnostic.** It propagates a change it did not originate:
+  a gain move made by a *separate* SCP client (not the bridge) was picked up via
+  `NOTIFY` and mapped to the peer. (Any controller, or the front panel, would do
+  the same — the bridge reacts to the `NOTIFY`, not to who caused it.)
+- **HAGain is NOT recalled by scenes on the DM3 — it is global / scene-safe.**
+  Controlled test: set ch16 to 50, stored a scratch scene, changed ch16 to 10,
+  recalled the scene → ch16 stayed 10. So a scene recall never surprise-moves
+  preamp gain, and the bridge's gain state is not disturbed by scene changes.
+  The practical corollary: a Yamaha "recall the saved scene to restore" does not
+  restore head-amp gains — those must be restored explicitly.
+
 ## 8. Still to do with this console
 
 - The fake Rio did not get R Remote to connect (§2). If revisited: alias IP on
