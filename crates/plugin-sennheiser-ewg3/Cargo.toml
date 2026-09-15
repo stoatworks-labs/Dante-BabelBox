@@ -1,0 +1,15 @@
+[package]
+name = "dante-babelbox-plugin-sennheiser-ewg3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "dante_babelbox_plugin_sennheiser_ewg3"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dante-babelbox-core.workspace = true
+dante-babelbox-oca-plugin-abi.workspace = true
+dante-babelbox-preamp-adapter-sennheiser-ewg3.workspace = true
+abi_stable.workspace = true

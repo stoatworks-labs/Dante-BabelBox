@@ -30,6 +30,7 @@ pub fn default_channel_count(kind: &str) -> Option<u16> {
         "ah-tcp" => Some(64),
         "dlive-tcp" => Some(128),
         "yamaha-dm3" => Some(16),
+        "sennheiser-ewg3" => Some(1),
         _ => None,
     }
 }

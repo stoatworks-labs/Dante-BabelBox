@@ -15,6 +15,14 @@
 #                confirmed reads/writes and a live NOTIFY change feed;
 #                the one hardware-validated DM3 path. Same channel/gain
 #                model as "yamaha-dm3". Prefer this over the OSC kind.
+#   "sennheiser-ewg3" Sennheiser evolution-wireless G3 rack receiver
+#                (EM 300/500 G3) over its binary WSM protocol (UDP 8133).
+#                One channel whose "gain" is the receiver's analog AF-out
+#                level (-24..+18 dB, 3 dB steps). Lets a console's remote
+#                head-amp gain drive the receiver output. `address` is the
+#                receiver's IP (front-panel Advanced > IP-Address); `port`
+#                is ignored (fixed 8133). CLOSE Wireless Systems Manager
+#                first - it holds the receiver's single write-master slot.
 #   "aes70"      Any device speaking the AES70/OCA standard - written
 #                against Focusrite RedNet (MP8R and any RedNet unit with
 #                AES70 enabled), but not vendor-specific: the device's
