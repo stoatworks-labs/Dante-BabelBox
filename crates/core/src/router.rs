@@ -22,18 +22,26 @@ pub struct Mapping {
 
 type SharedAdapter = Arc<Mutex<Box<dyn LocalAdapter>>>;
 
-/// Fans `OcaEvent`s out to every mapped peer address. Tracks the last
-/// value it pushed to each address so a device's own confirmation of a
-/// command the Router just sent isn't mistaken for an independent change
-/// and bounced back to its source (which would otherwise loop forever
-/// between two bidirectionally-mapped devices). Works uniformly over any
-/// device family (preamp control, mic telemetry, or whatever comes next) -
-/// every event is just "this object, on this device, now has this value."
+/// Fans `OcaEvent`s out to every mapped peer address. Tracks the value it
+/// last saw at every address - updated from both incoming events and its
+/// own pushes - so it never issues a `set` to a peer that already holds
+/// that value. That single rule is what stops a bidirectional mapping
+/// looping: a device's own confirmation of a command the Router just sent
+/// resolves to "the peer already holds this" and is dropped rather than
+/// bounced back to its source. Keying on the value the peer *holds* (not
+/// on a one-shot record of the last thing pushed) also contains the
+/// adversarial case where two adapters share a broadcast domain - two
+/// connections to one physical console, so each hears the other's
+/// `NOTIFY`s - which the wire can otherwise report more than once per
+/// change; every extra copy still resolves to "already held" and settles
+/// in one round. Works uniformly over any device family (preamp control,
+/// mic telemetry, or whatever comes next) - every event is just "this
+/// object, on this device, now has this value."
 pub struct Router {
     devices: RwLock<HashMap<String, SharedAdapter>>,
     listener_handles: RwLock<HashMap<String, tokio::task::AbortHandle>>,
     mappings: RwLock<Vec<Mapping>>,
-    last_pushed: Mutex<HashMap<OcaAddress, OcaValue>>,
+    last_known: Mutex<HashMap<OcaAddress, OcaValue>>,
 }
 
 impl Router {
@@ -42,7 +50,7 @@ impl Router {
             devices: RwLock::new(HashMap::new()),
             listener_handles: RwLock::new(HashMap::new()),
             mappings: RwLock::new(mappings),
-            last_pushed: Mutex::new(HashMap::new()),
+            last_known: Mutex::new(HashMap::new()),
         })
     }
 
@@ -133,10 +141,12 @@ impl Router {
     }
 
     async fn handle_event(&self, event: OcaEvent) {
-        if self.is_echo(&event).await {
-            debug!(address = ?event.address, "suppressing echo of our own push");
-            return;
-        }
+        // Whatever this event reports is now the known value at its
+        // address, whether it's a device's own change, a physical move, or
+        // a confirmation of a push we made. Recording it for every event
+        // is what lets the peer-side check below recognise an already-held
+        // value and stop the loop.
+        self.last_known.lock().await.insert(event.address.clone(), event.object.value.clone());
 
         for peer in self.peers_of(&event.address) {
             let device = self.devices.read().unwrap().get(&peer.device_id).cloned();
@@ -144,7 +154,23 @@ impl Router {
                 warn!(device_id = %peer.device_id, "mapping references unknown device");
                 continue;
             };
-            self.record_push(peer.clone(), event.object.value.clone()).await;
+
+            // Suppress by value-equality: never push a value the peer
+            // already holds. Claiming the value (recording it as held)
+            // and the skip decision happen under one lock, before the
+            // `set` await, so a concurrent listener - e.g. the peer's own
+            // confirming `NOTIFY`, or the same change re-reported by a
+            // second adapter on a shared console - sees it as already-held
+            // and doesn't bounce it back. This collapses the echo storm to
+            // one `set` per direction instead of ten rounds of them.
+            {
+                let mut known = self.last_known.lock().await;
+                if known.get(&peer) == Some(&event.object.value) {
+                    debug!(address = ?peer, "peer already holds this value; suppressing echo");
+                    continue;
+                }
+                known.insert(peer.clone(), event.object.value.clone());
+            }
 
             let mut device = device.lock().await;
             if let Err(e) = device.set_object(peer.ono, event.object.value.clone()).await {
@@ -165,28 +191,16 @@ impl Router {
         }
         peers
     }
-
-    async fn is_echo(&self, event: &OcaEvent) -> bool {
-        let mut last_pushed = self.last_pushed.lock().await;
-        if last_pushed.get(&event.address) == Some(&event.object.value) {
-            last_pushed.remove(&event.address);
-            true
-        } else {
-            false
-        }
-    }
-
-    async fn record_push(&self, address: OcaAddress, value: OcaValue) {
-        self.last_pushed.lock().await.insert(address, value);
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::adapter::{AdapterError, AdapterResult, DeviceInfo};
+    use crate::channel_scheme;
     use async_trait::async_trait;
     use dante_babelbox_oca::{Ono, OcaClass, OcaObject, OcaObjectDescriptor};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex as StdMutex;
     use std::time::Duration;
 
@@ -408,5 +422,182 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         assert_eq!(b_state.lock().unwrap().get(&1), Some(&OcaValue::F32(5.0)));
+    }
+
+    /// Models the adversarial bench topology of §7c: two `yamaha-dm3-scp`
+    /// adapters (`dm3-a`, `dm3-b`) that are really two TCP connections to
+    /// **one** physical console, bidirectionally mapped `ch11 <-> ch12`.
+    ///
+    /// The defeater a single clean connection doesn't have is *multiplicity*:
+    /// the shared desk reports one write more than once - its reply to the
+    /// connection that wrote, plus the broadcast `NOTIFY` every connection
+    /// hears - so the Router sees the same confirmation twice. `report_copies`
+    /// is that fan-out (1 = a lone clean link, which never bounced;
+    /// `>= 2` = the shared desk, which did). A suppression that consumed a
+    /// one-shot record damped only the first copy and bounced the rest; the
+    /// value-equality rule drops every copy of an already-held value.
+    struct SharedConsole {
+        report_copies: usize,
+        emissions: AtomicUsize,
+        emit_cap: usize,
+        /// Every `(device_id, value)` the Router actually pushed - its
+        /// length is the `set`-command count the test asserts on.
+        applied: StdMutex<Vec<(String, f32)>>,
+    }
+
+    impl SharedConsole {
+        /// Re-report a write's new value on the writer's own stream, as many
+        /// times as the shared desk would surface it, bounded by `emit_cap`
+        /// so a regressed (looping) Router can't spin forever in the test.
+        fn report(&self, tx: &broadcast::Sender<OcaEvent>, address: &OcaAddress, gain_db: f32) {
+            for _ in 0..self.report_copies {
+                if self.emissions.fetch_add(1, Ordering::SeqCst) >= self.emit_cap {
+                    return;
+                }
+                let _ = tx.send(gain_event_at(address, gain_db));
+            }
+        }
+    }
+
+    fn gain_event_at(address: &OcaAddress, gain_db: f32) -> OcaEvent {
+        OcaEvent {
+            address: address.clone(),
+            object: OcaObject {
+                ono: address.ono,
+                class: OcaClass::Gain,
+                role: "Gain".into(),
+                settable: true,
+                value: OcaValue::F32(gain_db),
+            },
+        }
+    }
+
+    struct SharedConsoleAdapter {
+        device_id: String,
+        /// This connection's view of its mapped object (its own `device_id`
+        /// with the ono of the channel it fronts).
+        endpoint: OcaAddress,
+        tx: broadcast::Sender<OcaEvent>,
+        console: Arc<SharedConsole>,
+    }
+
+    #[async_trait]
+    impl LocalAdapter for SharedConsoleAdapter {
+        fn id(&self) -> &str {
+            &self.device_id
+        }
+
+        async fn connect(&mut self) -> AdapterResult<()> {
+            Ok(())
+        }
+
+        async fn disconnect(&mut self) -> AdapterResult<()> {
+            Ok(())
+        }
+
+        async fn identify(&mut self) -> AdapterResult<DeviceInfo> {
+            Ok(DeviceInfo { vendor: "mock".into(), model: "shared-console".into(), address: "127.0.0.1".parse().unwrap() })
+        }
+
+        fn describe(&self) -> Vec<OcaObjectDescriptor> {
+            Vec::new()
+        }
+
+        async fn get_object(&mut self, _ono: Ono) -> AdapterResult<OcaValue> {
+            Err(AdapterError::UnsupportedChannel(0))
+        }
+
+        async fn set_object(&mut self, _ono: Ono, value: OcaValue) -> AdapterResult<()> {
+            let gain = value.as_f32().expect("bench mapping carries gain as f32");
+            self.console.applied.lock().unwrap().push((self.device_id.clone(), gain));
+            // The write lands on the shared desk, which re-broadcasts the
+            // new value to every connection - the adversarial echo the
+            // Router must damp in one round rather than bounce.
+            self.console.report(&self.tx, &self.endpoint, gain);
+            Ok(())
+        }
+
+        fn subscribe(&self) -> broadcast::Receiver<OcaEvent> {
+            self.tx.subscribe()
+        }
+    }
+
+    #[tokio::test]
+    async fn shared_broadcast_domain_converges_in_one_round_instead_of_amplifying() {
+        // dm3-a fronts ch11, dm3-b fronts ch12, both on the same desk.
+        let (a_tx, _a_rx0) = broadcast::channel(64);
+        let (b_tx, _b_rx0) = broadcast::channel(64);
+        let a_addr = OcaAddress::new("dm3-a", channel_scheme::gain_ono(11));
+        let b_addr = OcaAddress::new("dm3-b", channel_scheme::gain_ono(12));
+
+        let console = Arc::new(SharedConsole {
+            // Two copies per write == the shared desk (reply + broadcast).
+            // This is exactly the case that bounced ~42 sets over ~10 rounds
+            // on the bench; with `report_copies` at 1 the old Router already
+            // converged, which is why two *distinct* devices never looped.
+            report_copies: 2,
+            emissions: AtomicUsize::new(0),
+            emit_cap: 64,
+            applied: StdMutex::new(Vec::new()),
+        });
+
+        let adapter_a = SharedConsoleAdapter {
+            device_id: "dm3-a".into(),
+            endpoint: a_addr.clone(),
+            tx: a_tx.clone(),
+            console: console.clone(),
+        };
+        let adapter_b = SharedConsoleAdapter {
+            device_id: "dm3-b".into(),
+            endpoint: b_addr.clone(),
+            tx: b_tx.clone(),
+            console: console.clone(),
+        };
+
+        let router = Router::new(vec![Mapping { from: a_addr.clone(), to: b_addr.clone(), bidirectional: true }]);
+        router.register_device("dm3-a", Arc::new(Mutex::new(Box::new(adapter_a) as Box<dyn LocalAdapter>))).await;
+        router.register_device("dm3-b", Arc::new(Mutex::new(Box::new(adapter_b) as Box<dyn LocalAdapter>))).await;
+
+        // User action 1: move ch11 to 22. Its single NOTIFY reaches dm3-a's
+        // stream; the Router should pull ch12 to match in one write.
+        let _ = a_tx.send(gain_event_at(&a_addr, 22.0));
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        {
+            let applied = console.applied.lock().unwrap();
+            assert!(
+                applied.iter().any(|(d, v)| d == "dm3-b" && *v == 22.0),
+                "ch11->ch12 never propagated: {applied:?}",
+            );
+            // The core assertion: ~1 set per direction, not ~10. Before the
+            // value-equality rule this ran away to `emit_cap`.
+            assert!(
+                applied.len() <= 2,
+                "echo storm not contained: {} set commands for one user action \
+                 (want <= 2, ~1 per direction): {applied:?}",
+                applied.len(),
+            );
+        }
+
+        // User action 2: move ch12 to 33 - the other direction, and a value
+        // neither side holds, so a legitimate propagation that must still go
+        // through (the fix suppresses re-sends of already-held values, never
+        // genuine changes).
+        console.applied.lock().unwrap().clear();
+        console.emissions.store(0, Ordering::SeqCst);
+        let _ = b_tx.send(gain_event_at(&b_addr, 33.0));
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let applied = console.applied.lock().unwrap();
+        assert!(
+            applied.iter().any(|(d, v)| d == "dm3-a" && *v == 33.0),
+            "ch12->ch11 never propagated - suppression is eating a legitimate change: {applied:?}",
+        );
+        assert!(
+            applied.len() <= 2,
+            "echo storm not contained on the reverse direction: {} set commands \
+             for one user action (want <= 2): {applied:?}",
+            applied.len(),
+        );
     }
 }
