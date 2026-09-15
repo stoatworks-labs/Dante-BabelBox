@@ -41,7 +41,9 @@
 //! `None` until one of them is seen to change under a known action.
 
 mod dm3;
+mod dm3_scp;
 pub mod mbc;
 
 pub use dm3::Dm3Adapter;
+pub use dm3_scp::{Dm3ScpAdapter, SCP_PORT};
 pub use mbc::{MbcAdapter, MbcIdentity};

@@ -24,7 +24,10 @@ Cross-vendor Dante preamp + mic bridge (Rust). Normalizes preamp control and wir
   the bytes yet, because the transport (MIDI vs the unit's Ethernet port) is
   undecided. Don't wire a transport without reading the module comment first
 - `preamp-adapter-{osc,ah,yamaha}` — preamp vendor adapters
-- `preamp-adapter-yamaha` also carries `mbc` — Rio/Tio + QL/CL head amps over Audinate ConMon
+- `preamp-adapter-yamaha` holds `dm3` (OSC, kind `yamaha-dm3`) and `dm3_scp`
+  (`Dm3ScpAdapter`, SCP/TCP 49280, kind `yamaha-dm3-scp` — the hardware-validated,
+  recommended DM3 path via `plugin-yamaha-dm3-scp`), plus `mbc` (Rio/Tio + QL/CL head
+  amps over Audinate ConMon)
 - `mic-adapter-{shure,sennheiser,lectrosonics}` — wireless-mic vendor adapters (lectrosonics = placeholder wire format); `mic-adapter-shure-acn` = QLX-D on a console, read-only
 - `preamp-cli` / `mic-cli` — command-line entrypoints
 - `preamp-web` — web UI

@@ -294,7 +294,7 @@ mod tests {
 
     /// With a real plugins directory, `build_registry` picks up every
     /// migrated kind's dylib alongside the two static ones - proof the
-    /// loader genuinely finds and registers all six real vendor kinds,
+    /// loader genuinely finds and registers all the real vendor kinds,
     /// not just the pair still statically wired.
     #[test]
     fn build_registry_loads_every_migrated_kind_from_a_real_plugins_dir() {
@@ -314,7 +314,10 @@ mod tests {
                 "osc-x32",
                 "rednet-aes70",
                 "yamaha",
-                "yamaha-dm3"
+                // The DM3 ships two plugins: OSC (`yamaha-dm3`) and the
+                // hardware-validated SCP transport (`yamaha-dm3-scp`).
+                "yamaha-dm3",
+                "yamaha-dm3-scp"
             ]
         );
     }

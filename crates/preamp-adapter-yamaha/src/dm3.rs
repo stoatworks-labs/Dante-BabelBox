@@ -224,6 +224,11 @@ fn parse_headamp_addr(addr: &str) -> Option<(u16, HeadampField)> {
 fn last_int_value(args: &[OscType]) -> Option<i32> {
     args.iter().rev().find_map(|a| match a {
         OscType::Int(i) => Some(*i),
+        // The DM3 returns `48VOn` (and Dev status fields) as an OSC **int64**
+        // (`h`), not int32 - confirmed on real hardware, 2026-09-15. Without
+        // this arm the phantom reply is silently dropped and `phantom` stays
+        // at its `false` default regardless of the console. See the bench doc.
+        OscType::Long(l) => Some(*l as i32),
         OscType::Float(f) => Some(*f as i32),
         _ => None,
     })

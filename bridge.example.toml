@@ -11,6 +11,10 @@
 #                "socket" addressing, channel = socket number 1-128)
 #   "yamaha-dm3" Yamaha DM3/DM3S (official OSC spec; channel = Local
 #                Input Num 1-16; gain is coarse integer dB, 0-64 only)
+#   "yamaha-dm3-scp" Yamaha DM3/DM3S over SCP (TCP 49280) - RECOMMENDED:
+#                confirmed reads/writes and a live NOTIFY change feed;
+#                the one hardware-validated DM3 path. Same channel/gain
+#                model as "yamaha-dm3". Prefer this over the OSC kind.
 #   "aes70"      Any device speaking the AES70/OCA standard - written
 #                against Focusrite RedNet (MP8R and any RedNet unit with
 #                AES70 enabled), but not vendor-specific: the device's

@@ -155,3 +155,17 @@ fires on the tag push and its unversioned `.tar.gz` assets will sit alongside th
 ones, exactly as they did on v0.1.1 — that is expected, not a second failure. Also worth
 knowing: `verify-signing.sh` passes a release as soon as *one* asset is checkable, so the
 unsigned macOS `.tar.gz` is not caught by the gate even when everything else is correct.
+
+**2026-09-15 — DM3 is now a FULLY SUPPORTED, hardware-validated target (SCP).**
+Added `Dm3ScpAdapter` (`crates/preamp-adapter-yamaha/src/dm3_scp.rs`) + plugin
+`plugin-yamaha-dm3-scp` (kind `yamaha-dm3-scp`, TCP 49280). Every `DeviceAdapter`
+method validated against the real DM3 (V3.00) through the full plugin stack
+(`preamp-bridge` loaded the cdylib and connected): identify (`devinfo
+productname`), get_state (confirmed `OK get`, no stale cache), set_gain/set_phantom
+(confirmed `OK set`), and a real `subscribe()` fed by the DM3's `NOTIFY` push. This
+is the first adapter here with every path hardware-proven, not just mock-tested.
+The OSC `Dm3Adapter` (kind `yamaha-dm3`) stays as the legacy transport; also fixed
+its int64 phantom-read bug (`48VOn` is OSC `h`, was silently dropped). SCP framing:
+`get/set <addr> <x> 0 [v]`, 0-based index, gain 0-64 dB direct, `48VOn` 0/1;
+heartbeat `devstatus runmode` every 20 s holds the session. Tests take vectors from
+the real captured frames. See `docs/yamaha-dm3-bench-2026-09-15.md` §7b.
