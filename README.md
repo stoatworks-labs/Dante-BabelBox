@@ -5,11 +5,22 @@
 > against official/community-authoritative vendor protocol specs (see each
 > adapter's module doc comment for its source) — with one clearly-flagged
 > exception, the Lectrosonics mic adapter, whose wire format is an unverified
-> placeholder (see the Radio Mic Telemetry status table). No adapter in this
-> workspace has been **validated against real hardware** — only against mock
-> devices in the test suite. Review before use on live gear.
+> placeholder (see the Radio Mic Telemetry status table). Almost every adapter
+> here has been tested only against mock devices, **not validated against real
+> hardware** — with the two exceptions below. Review before use on live gear.
 >
-> **One exception, and it's a big one.** The Yamaha R-series HA protocol has
+> **Exception one: the Yamaha DM3 adapter has now run against a real DM3**
+> (firmware V3.00), on 2026-09-15. `Dm3Adapter`'s `identify`, `get_state`,
+> `set_gain` and `set_phantom` were all exercised against the console — gain and
+> phantom **writes** included, confirmed by the desk's own change notifications
+> on a second connection. This is the first adapter *code* (not just a protocol)
+> proven on hardware in this workspace. The same session found the adapter's OSC
+> transport wanting — the DM3 pushes change events only over its SCP/TCP port, so
+> `subscribe()` never fires over OSC, and a read straight after a write returns a
+> stale cache — so the write-up recommends a future SCP adapter. Full findings:
+> [`docs/yamaha-dm3-bench-2026-09-15.md`](docs/yamaha-dm3-bench-2026-09-15.md).
+>
+> **Exception two, and it's a big one.** The Yamaha R-series HA protocol has
 > been captured from a real QL1 + Rio3224-D2, decoded, documented, and then
 > **rebuilt from that documentation and transmitted back — the stagebox
 > accepted it and changed its gain.** See
@@ -107,7 +118,7 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 | Allen & Heath | dLive | NRPN-over-TCP (Socket addressing) | Done |
 | Allen & Heath | DT168, DT164-W (Dante expanders) | `AllenHth` vendor messages over Audinate ConMon | **Codec only, no transport.** Built/parsed from static reverse-engineering of A&H's *DT Preamp Control* app + SQ Dante-card firmware — gain, pad, +48 V for 16 preamps. No capture, no hardware: a well-evidenced hypothesis, not proven bytes. Transport (ConMon) needs Audinate DAPI, as with Aphex. See [docs/allenheath-dt-preamp-over-dante.md](docs/allenheath-dt-preamp-over-dante.md) |
 | Allen & Heath | Qu, SQ | (likely `AllenHth` ConMon — see DT168) | Not implemented, but no longer a blank: the SQ's Dante card (KLANTE) registers the same `AllenHth` ConMon namespace as the DT expanders, so the DT codec is the most promising SQ-over-Dante path pending a capture. The published SQ MIDI protocol documents no preamp control |
-| Yamaha | DM3 / DM3S | OSC | Done |
+| Yamaha | DM3 / DM3S | OSC | Done — and **run against a real DM3** (V3.00, 2026-09-15): identify, gain/phantom read + write all confirmed on hardware. See [docs/yamaha-dm3-bench-2026-09-15.md](docs/yamaha-dm3-bench-2026-09-15.md). Note: the DM3's push/`NOTIFY` and reliable read-back are on its **SCP/TCP** port, not OSC — a future `yamaha-scp` adapter is the better long-term path |
 | Yamaha | CL, QL | `MBC` over Audinate ConMon | Partial — a QL/CL is the *controlling* side of the captured protocol, and the same adapter addresses it. Driving a console's own **local** head amps was never observed on the wire, so it is untested and may not be supported at all |
 | Yamaha | DM7 | — | Not implemented — no public spec, and nothing confirms it shares DM3's OSC dialect or the R-series `MBC` block |
 | Yamaha | Rio, Tio (R-series) | `MBC` over Audinate ConMon | Implemented — gain, +48 V and metering, from a wire format [captured and proven on real hardware](docs/yamaha-ha-remote-over-dante.md). Never run against a device. |
