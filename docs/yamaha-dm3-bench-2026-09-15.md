@@ -338,14 +338,58 @@ the console — the legacy bridge only queries state when something asks.
    `rio-fake` needs to send.
 4. `init` needs the address-selection and concurrency fixes in §5.
 
+## 7b. The DM3 Editor sync protocol — MMS over TCP 50368 (added later 2026-09-15)
+
+Taking the macOS **DM3 Editor** online with this console exposed a **third**
+Yamaha control protocol, distinct from SCP (§3) and OSC (§4). Capture:
+`stoatworks-labs/dante-captures` `yamaha-dm3-editor/`.
+
+- **Transport: one TCP connection to port 50368.** The Editor connects, and the
+  console's state is transferred as the **MMS parameter framework** (`MMS::` in
+  the firmware; the `mms_*.xml` descriptors) serialized on the wire. Message
+  starts carry 4-char tags: `EEVT` (events / keepalive) and the MMS categories
+  `MSTS` (Status), `MPRC`/`MPRO` (Processing), `MMIX` (Mixing), `MVOL`
+  (Volume/fader), `MSCL`/`MSCS` (Scene), `MSUP` (Setup), `MCST`. A transport
+  framing tagged `d000`/`d010`/`d020`/… wraps the payloads across TCP segments,
+  and the payloads carry the same parameter-path strings as SCP (`Gain`,
+  `Level`, `HPFOn`, `Pan`, `Scene`, …).
+- **A successful sync** (Direct IP, Data Sync DM3→PC): the console pushed
+  **3.30 MB** to the Editor (5175 frames > 56 B), the Editor sent 309 KB of
+  requests, and the Editor went ONLINE mirroring the desk exactly — scene
+  A30 "ins on", channel names, IN 1 = +23 dB — all cross-checking the §3 SCP
+  reads.
+- **Online steady state** is bidirectional `EEVT` KeepAlive (56 B, ~1/s).
+- **Live push**: an SCP `set` on ch 9 from a *separate* connection, made while
+  the Editor was online, arrived at the Editor as `MSTS`/`MPRC` frames (106/122
+  B) — 50368 carries external changes live, the analogue of SCP's `NOTIFY`.
+- **The operational trap, worth an hour:** the Editor will **not** sync while
+  **R Remote is running.** R Remote holds the shared Yamaha discovery port
+  **UDP 54330** (YSDP, §2); with it held, Direct-IP connect established the 50368
+  event channel and received KeepAlive but never began the bulk transfer
+  (spinner forever), and the interface path showed an empty device list. Quitting
+  R Remote freed 54330 and the next connect synced fully. **Only one Yamaha
+  control app can be online per host.** This is not a subnet problem — all
+  addresses are `169.254.0.0/16` and the console answered SCP/OSC/50368
+  throughout; only the sync *handshake* was gated on the discovery port.
+- Not relevant to the bridge directly, but noted: the Editor keeps its scene
+  library as `.dm3s` files under `~/Library/Application Support/Yamaha/DM3
+  Editor/SceneList/Bank{A,B}/` — PatchFerret's format, a ready cross-check.
+
+For the bridge, this reinforces §7: Yamaha's real control surfaces are
+TCP-based (SCP 49280 for command/notify, 50368 MMS for full editor sync), not
+the OSC port the current adapter uses. A `yamaha-scp` adapter remains the right
+next step; the 50368 MMS protocol is a heavier lift (full binary framework) and
+only worth it for whole-console mirroring, which is out of scope for a preamp
+bridge.
+
 ## 8. Still to do with this console
 
 - The fake Rio did not get R Remote to connect (§2). If revisited: alias IP on
   the Dante NIC first (rules out the self-address theory), then compare the
   fake's `0x8004` bytes against a *real* Rio's response field by field — which
   needs a Rio, so this is properly blocked on hardware, not on more guessing.
-- DM3 Editor online: capture the Editor's sync protocol, and see whether it
-  copes with the unreachable NETWORK address on a flat network.
+- ~~DM3 Editor online: capture the Editor's sync protocol~~ **done** (§7b): MMS
+  over TCP 50368; blocked only by R Remote holding UDP 54330, not by the network.
 - A `yamaha-scp` adapter (TCP 49280): the DM3 is a complete, hardware-validated
   target for it today — read, write, scenes and `NOTIFY` are all proven above.
 - Mount a faked Rio on the DM3's I/O device screen: does the console emit MBC
