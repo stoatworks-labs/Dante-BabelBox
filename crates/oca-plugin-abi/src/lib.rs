@@ -250,6 +250,29 @@ pub trait PluginAdapter: Send + Sync {
     /// blocks.
     #[sabi(last_prefix_field)]
     fn poll_events(&mut self) -> RVec<OcaEventFfi>;
+
+    /// Moves a numeric object by `delta` from the device's live value and
+    /// returns the change actually made (after the device's range and step) -
+    /// what the gain lock drives a follower desk's trim with. Relative so a
+    /// change someone made at the device since the host last looked survives.
+    ///
+    /// Added after `poll_events`, the `last_prefix_field`, with a default
+    /// body, so a plugin rebuilt against this version needn't implement it -
+    /// it answers "can't do this" and the gain lock reports that follower as
+    /// having no trim control.
+    ///
+    /// That is source compatibility, not binary: a plugin *binary* built
+    /// before this method existed is refused at load (`abi_stable`'s layout
+    /// check: "too many fields", expected 11, found 10), not loaded with a
+    /// hole in its vtable. Checked by loading a v0.4.1 X32 plugin into this
+    /// host. A plugin needs rebuilding for each host release anyway (see the
+    /// crate doc on toolchains); the refusal just makes a missed rebuild loud.
+    /// Leave `last_prefix_field` where it is - moving it is a breaking change
+    /// of its own.
+    fn nudge_object(&mut self, ono: u32, delta: f32) -> RResult<f32, RString> {
+        let _ = delta;
+        RResult::RErr(format!("this plugin has no relative control for object 0x{ono:08x}").into())
+    }
 }
 
 pub type PluginAdapterBox = PluginAdapter_TO<'static, abi_stable::std_types::RBox<()>>;

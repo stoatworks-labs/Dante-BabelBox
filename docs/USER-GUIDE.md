@@ -132,6 +132,9 @@ UI can be demonstrated with no hardware on the network.*
 - **Crosspoint tab** — the same mappings as a matrix, scoped to channels that are actually mapped.
   A full all-channels grid across even two devices would be tens of thousands of cells, so pin a
   device to bring all its channels into the grid on demand.
+- **Gain lock tab** — when `bridge.toml` has a `[gain_lock]` table: elect the leader desk, lock
+  and unlock, set the leader's preamp gains, and see what the lock has done to each follower's trim.
+  See [Gain compensation](#gain-compensation-the-gain-lock) below.
 - **Device management** — add real devices (connects immediately) or **virtual** ones.
 - **Export as TOML** — devices and mappings added through the UI are **in-memory only and do not
   survive a restart**. This button exports the current state so you can paste it into
@@ -180,12 +183,48 @@ bidirectional = true
 ```
 
 > **`channel` means whatever the underlying protocol's native addressing unit is** — an X32
-> headamp number, a dLive physical preamp **Socket** number (which is *not* the processing channel
+> headamp number (1–128: local 1–32, AES50-A 33–80, AES50-B 81–128), a dLive physical preamp **Socket** number (which is *not* the processing channel
 > number), a DM3 Local Input number. This is the single most likely thing to get wrong. Check the
 > relevant adapter's module doc comment for exact ranges.
 
 `kind` is an open string, not a fixed list: a loaded plugin can register additional kinds. A fully
 worked example is in [`bridge.example.toml`](../bridge.example.toml).
+
+---
+
+## Gain compensation (the gain lock)
+
+When several desks share one stage box, one desk owns the preamps. Any gain change it makes is
+heard by every other desk. Declare that desk the **leader**, name the **signals** the desks share,
+and **lock**: from then on each follower desk's digital trim takes the opposite of every leader gain
+change, so the followers' levels stay put.
+
+```toml
+[gain_lock]
+leader = "foh"
+
+[[gain_lock.signal]]
+name = "Kick In"
+members = [
+  { device = "foh", preamp = 1 },   # the leader's preamp
+  { device = "mon", input = 1 },    # the follower's input channel, whose trim moves
+]
+```
+
+What to know before using it at a show:
+
+- **Moves are relative.** The bridge reads each follower's live trim and moves it from there, so a
+  trim change the monitor engineer makes mid-show is kept.
+- **Nothing is lost at a limit.** A trim that runs out of range keeps the difference and takes it
+  back when the leader comes down. A desk that drops off the network gets the missed amount when
+  it returns.
+- **Followers today are X32/M32 and Wing.** They're the only protocols here that document a
+  writable channel trim. Any device with a preamp can lead. On an X32 the documented trim covers
+  digital sources only; check it on a headamp-fed channel first.
+- **Tested against mock desks only.** No real desk has followed a leader yet.
+
+The full guide, with the rules, the desk survey and a first-rig checklist, is
+[GAIN-LOCK.md](GAIN-LOCK.md).
 
 ---
 

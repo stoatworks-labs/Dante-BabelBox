@@ -163,6 +163,7 @@ enum Command {
     Identify(oneshot::Sender<AdapterResult<DeviceInfo>>),
     Get(u32, oneshot::Sender<AdapterResult<OcaValue>>),
     Set(u32, OcaValue, oneshot::Sender<AdapterResult<()>>),
+    Nudge(u32, f32, oneshot::Sender<AdapterResult<f32>>),
 }
 
 /// Bridges one dylib-backed [`PluginAdapterBox`] into a [`LocalAdapter`],
@@ -236,6 +237,13 @@ impl DylibAdapter {
                             .map_err(|e| AdapterError::Protocol(e.into()));
                         let _ = reply.send(result);
                     }
+                    Ok(Command::Nudge(ono, delta, reply)) => {
+                        let result = adapter
+                            .nudge_object(ono, delta)
+                            .into_result()
+                            .map_err(|e| AdapterError::Protocol(e.into()));
+                        let _ = reply.send(result);
+                    }
                     Err(RecvTimeoutError::Timeout) => {
                         for event in adapter.poll_events() {
                             let (device_id, object) = event.into_object();
@@ -304,6 +312,10 @@ impl LocalAdapter for DylibAdapter {
 
     async fn set_object(&mut self, ono: Ono, value: OcaValue) -> AdapterResult<()> {
         self.call(|reply| Command::Set(ono.into(), value, reply)).await
+    }
+
+    async fn nudge_object(&mut self, ono: Ono, delta: f32) -> AdapterResult<f32> {
+        self.call(|reply| Command::Nudge(ono.into(), delta, reply)).await
     }
 
     fn subscribe(&self) -> broadcast::Receiver<OcaEvent> {

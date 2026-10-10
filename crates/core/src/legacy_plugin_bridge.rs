@@ -139,12 +139,19 @@ impl PluginAdapter for LegacyPluginBridge {
     fn describe(&self) -> RVec<OcaObjectDescriptorFfi> {
         channel_scheme::descriptors_for_channels(self.channels)
             .into_iter()
+            .chain(channel_scheme::trim_descriptors(self.inner.trim_inputs()))
             .map(OcaObjectDescriptorFfi::from)
             .collect::<Vec<_>>()
             .into()
     }
 
     fn get_object(&mut self, ono: u32) -> RResult<OcaValueFfi, RString> {
+        if let Some(input) = channel_scheme::decode_trim_ono(Ono(ono), self.inner.trim_inputs()) {
+            return match self.runtime.block_on(self.inner.get_trim(input)) {
+                Ok(db) => RResult::ROk(OcaValueFfi::F32(db)),
+                Err(e) => RResult::RErr(e.to_string().into()),
+            };
+        }
         let Some((channel, field)) = channel_scheme::decode_ono(Ono(ono), self.channels) else {
             return RResult::RErr(format!("no such object 0x{ono:08x}").into());
         };
@@ -162,6 +169,15 @@ impl PluginAdapter for LegacyPluginBridge {
     }
 
     fn set_object(&mut self, ono: u32, value: OcaValueFfi) -> RResult<(), RString> {
+        if let Some(input) = channel_scheme::decode_trim_ono(Ono(ono), self.inner.trim_inputs()) {
+            let OcaValueFfi::F32(v) = value else {
+                return RResult::RErr("trim requires an F32 value".into());
+            };
+            return match self.runtime.block_on(self.inner.set_trim(input, v)) {
+                Ok(()) => RResult::ROk(()),
+                Err(e) => RResult::RErr(e.to_string().into()),
+            };
+        }
         let Some((channel, field)) = channel_scheme::decode_ono(Ono(ono), self.channels) else {
             return RResult::RErr(format!("no such object 0x{ono:08x}").into());
         };
@@ -189,6 +205,18 @@ impl PluginAdapter for LegacyPluginBridge {
     fn poll_events(&mut self) -> RVec<OcaEventFfi> {
         let mut queue = self.events.lock().unwrap();
         queue.drain(..).collect::<Vec<_>>().into()
+    }
+
+    /// Only trim objects move relatively. A preamp gain is the *leader's*
+    /// control in a gain lock, set absolutely by whoever owns it.
+    fn nudge_object(&mut self, ono: u32, delta: f32) -> RResult<f32, RString> {
+        let Some(input) = channel_scheme::decode_trim_ono(Ono(ono), self.inner.trim_inputs()) else {
+            return RResult::RErr(format!("object 0x{ono:08x} has no relative control").into());
+        };
+        match self.runtime.block_on(self.inner.nudge_trim(input, delta)) {
+            Ok(applied) => RResult::ROk(applied),
+            Err(e) => RResult::RErr(e.to_string().into()),
+        }
     }
 }
 
@@ -372,4 +400,87 @@ mod tests {
         assert_eq!(gain, Some(OcaValueFfi::F32(1.5)));
         assert_eq!(phantom, Some(OcaValueFfi::Bool(true)));
     }
+
+    /// A device with trim: only what the bridge needs to route it.
+    struct TrimMock {
+        tx: broadcast::Sender<PreampEvent>,
+        trims: Arc<StdMutex<HashMap<u16, f32>>>,
+    }
+
+    #[async_trait]
+    impl DeviceAdapter for TrimMock {
+        fn id(&self) -> &str {
+            "trim"
+        }
+        async fn connect(&mut self) -> crate::adapter::AdapterResult<()> {
+            Ok(())
+        }
+        async fn disconnect(&mut self) -> crate::adapter::AdapterResult<()> {
+            Ok(())
+        }
+        async fn identify(&mut self) -> crate::adapter::AdapterResult<crate::adapter::DeviceInfo> {
+            Err(crate::adapter::AdapterError::Protocol("unused".into()))
+        }
+        async fn set_gain(&mut self, _channel: u16, _gain_db: f32) -> crate::adapter::AdapterResult<()> {
+            Ok(())
+        }
+        async fn set_phantom(&mut self, _channel: u16, _on: bool) -> crate::adapter::AdapterResult<()> {
+            Ok(())
+        }
+        async fn get_state(&mut self, channel: u16) -> crate::adapter::AdapterResult<PreampState> {
+            Err(crate::adapter::AdapterError::UnsupportedChannel(channel))
+        }
+        fn subscribe(&self) -> broadcast::Receiver<PreampEvent> {
+            self.tx.subscribe()
+        }
+        fn trim_inputs(&self) -> u16 {
+            8
+        }
+        async fn get_trim(&mut self, input: u16) -> crate::adapter::AdapterResult<f32> {
+            Ok(self.trims.lock().unwrap().get(&input).copied().unwrap_or(0.0))
+        }
+        async fn set_trim(&mut self, input: u16, trim_db: f32) -> crate::adapter::AdapterResult<()> {
+            self.trims.lock().unwrap().insert(input, trim_db);
+            Ok(())
+        }
+        async fn nudge_trim(&mut self, input: u16, delta_db: f32) -> crate::adapter::AdapterResult<f32> {
+            let law = crate::DbLaw::new(-18.0, 18.0, 0.25);
+            let mut trims = self.trims.lock().unwrap();
+            let (target, applied) = law.nudge(trims.get(&input).copied().unwrap_or(0.0), delta_db);
+            trims.insert(input, target);
+            Ok(applied)
+        }
+    }
+
+    #[test]
+    fn trim_objects_are_described_read_written_and_nudged() {
+        let trims = Arc::new(StdMutex::new(HashMap::new()));
+        let adapter = TrimMock { tx: broadcast::channel(4).0, trims: trims.clone() };
+        let mut bridge = LegacyPluginBridge::new(Box::new(adapter), 4);
+
+        let roles: Vec<String> = bridge.describe().into_iter().map(|d| d.role.into_string()).collect();
+        assert_eq!(roles.len(), 12 + 8);
+        assert!(roles.contains(&"In 8 Trim".to_string()));
+
+        let ono = u32::from(channel_scheme::trim_ono(3));
+        assert!(matches!(bridge.set_object(ono, OcaValueFfi::F32(2.0)), RResult::ROk(())));
+        assert_eq!(bridge.get_object(ono), RResult::ROk(OcaValueFfi::F32(2.0)));
+        assert_eq!(bridge.nudge_object(ono, -3.0), RResult::ROk(-3.0));
+        assert_eq!(trims.lock().unwrap()[&3], -1.0);
+        // At the limit the bridge passes on what was actually applied.
+        assert_eq!(bridge.nudge_object(ono, 40.0), RResult::ROk(19.0));
+    }
+
+    #[test]
+    fn only_trim_objects_move_relatively() {
+        let (adapter, ..) = mock();
+        let mut bridge = LegacyPluginBridge::new(Box::new(adapter), 4);
+        let gain = u32::from(channel_scheme::gain_ono(1));
+        assert!(matches!(bridge.nudge_object(gain, 1.0), RResult::RErr(_)));
+        // A device without trim describes none and refuses a trim ono.
+        assert_eq!(bridge.describe().len(), 12);
+        let trim = u32::from(channel_scheme::trim_ono(1));
+        assert!(matches!(bridge.nudge_object(trim, 1.0), RResult::RErr(_)));
+    }
+
 }

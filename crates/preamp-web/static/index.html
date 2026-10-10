@@ -102,6 +102,32 @@
   td button.cell:hover { background: #22262e; }
   td.active button.cell { background: #2f6f4f; color: #d4ffe6; font-weight: bold; }
 
+  /* --- Gain lock tab --- */
+  #gainlock-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }
+  #gainlock-bar label { font-size: 0.8rem; color: #8a8f98; display: flex; align-items: center; gap: 0.4rem; }
+  #gainlock-bar select { background: #101216; border: 1px solid #2a2d33; color: #e6e6e6; border-radius: 4px; padding: 0.3rem 0.5rem; }
+  #lock-btn {
+    font-size: 0.85rem; font-weight: 600; letter-spacing: 0.04em; border-radius: 4px;
+    padding: 0.4rem 1rem; cursor: pointer; border: 1px solid #3a3f47; background: #1c1f26; color: #b7bfca;
+  }
+  #lock-btn.locked { background: #2f6f4f; border-color: #37835c; color: #eafff2; }
+  #lock-btn:hover { filter: brightness(1.12); }
+  #gainlock-summary { font-size: 0.8rem; color: #8a8f98; }
+  .gl-table { width: 100%; max-width: 64rem; }
+  .gl-table th, .gl-table td { min-width: 0; height: auto; padding: 0.4rem 0.55rem; text-align: left; font-size: 0.8rem; vertical-align: middle; }
+  .gl-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .gl-table .muted { color: #6b7280; }
+  .gl-gain { display: flex; align-items: center; gap: 0.3rem; }
+  .gl-gain button { background: #1c1f26; border: 1px solid #2a2d33; color: #b7bfca; border-radius: 3px; padding: 0.1rem 0.45rem; cursor: pointer; font-size: 0.8rem; }
+  .gl-gain button:hover { background: #22262e; }
+  .gl-gain input { width: 4.2rem; background: #101216; border: 1px solid #2a2d33; color: #e6e6e6; border-radius: 3px; padding: 0.15rem 0.3rem; font: inherit; text-align: right; }
+  .gl-follower { display: inline-block; margin: 0.1rem 0.35rem 0.1rem 0; padding: 0.15rem 0.45rem; border-radius: 3px; background: #1c1f26; border: 1px solid #2a2d33; font-size: 0.75rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .gl-follower.short { border-color: #6b5a1e; color: #f2c14e; }
+  .gl-follower.failed { border-color: #6b2a2a; color: #ff9b9b; }
+  .gl-problem { color: #f2c14e; font-size: 0.75rem; }
+  #gainlock-empty { font-size: 0.85rem; color: #8a8f98; max-width: 40rem; }
+  #gainlock-empty code { background: #1c1f26; padding: 0.05rem 0.3rem; border-radius: 3px; }
+
   #status { margin-top: 1rem; font-size: 0.8rem; color: #777; min-height: 1.2em; }
   #disclaimer { margin-top: 2.5rem; font-size: 0.75rem; color: #565b64; max-width: 32rem; }
 </style>
@@ -116,6 +142,7 @@
 <div id="tabs">
   <button type="button" class="tab-btn active" data-tab="patch">Patch</button>
   <button type="button" class="tab-btn" data-tab="crosspoint">Crosspoint</button>
+  <button type="button" class="tab-btn" data-tab="gainlock">Gain lock</button>
 </div>
 
 <div id="patch-panel" class="tab-panel active">
@@ -183,6 +210,25 @@
   <div id="crosspoint-grid"><p>Loading…</p></div>
 </div>
 
+<div id="gainlock-panel" class="tab-panel">
+  <div id="gainlock-empty" hidden>
+    <p>No gain lock is configured. Add a <code>[gain_lock]</code> table to <code>bridge.toml</code> - a leader
+    desk and the signals it shares with the follower desks - and restart the bridge. See
+    <code>docs/GAIN-LOCK.md</code>.</p>
+  </div>
+  <div id="gainlock-body" hidden>
+    <div id="gainlock-bar">
+      <label>Leader <select id="leader-select"></select></label>
+      <button type="button" id="lock-btn">Lock</button>
+      <span id="gainlock-summary"></span>
+    </div>
+    <table class="gl-table">
+      <thead><tr><th>Signal</th><th>Leader preamp</th><th>Gain</th><th>Since lock</th><th>Followers (trim moved by the lock)</th></tr></thead>
+      <tbody id="gainlock-rows"></tbody>
+    </table>
+  </div>
+</div>
+
 <div id="status"></div>
 <p id="disclaimer">AI-assisted project (built with Claude), reviewed by a human author. See the repo README for current verification status.</p>
 
@@ -227,6 +273,7 @@ function render(state) {
   renderPatchTab(state);
   renderCrosspointTab(state);
   renderPinSelect(state);
+  renderGainLockTab(state);
 }
 
 // ---------------------------------------------------------------------
@@ -447,6 +494,132 @@ function renderCrosspointTab(state) {
     });
   });
 }
+
+// ---------------------------------------------------------------------
+// Gain lock tab
+// ---------------------------------------------------------------------
+// A follower owed less than this is rounding to its trim step, not a problem.
+const OWED_WARN_DB = 0.25;
+
+function fmtDb(v, signed) {
+  if (v === null || v === undefined) return '—';
+  const s = v.toFixed(1);
+  return (signed && v > 0 ? '+' : '') + (s === '-0.0' ? '0.0' : s) + ' dB';
+}
+
+function followerChip(f) {
+  let cls = 'gl-follower';
+  let note = '';
+  if (f.error) {
+    cls += ' failed';
+    note = ` - failing, ${fmtDb(f.owed_db, true)} waiting`;
+  } else if (Math.abs(f.owed_db) >= OWED_WARN_DB) {
+    cls += ' short';
+    note = ` - ${fmtDb(Math.abs(f.owed_db), false)} short (trim at its limit?)`;
+  }
+  const title = f.error ? ` title="${escapeHtml(f.error)}"` : '';
+  return `<span class="${cls}"${title}>${escapeHtml(f.device)} · in ${f.input}: ${fmtDb(f.applied_db, true)}${escapeHtml(note)}</span>`;
+}
+
+function renderGainLockTab(state) {
+  const gl = state.gain_lock;
+  document.getElementById('gainlock-empty').hidden = !!gl;
+  document.getElementById('gainlock-body').hidden = !gl;
+  if (!gl) return;
+
+  // Don't redraw under someone typing a gain.
+  const focused = document.activeElement;
+  if (focused && focused.closest && focused.closest('#gainlock-rows') && focused.tagName === 'INPUT') return;
+
+  const select = document.getElementById('leader-select');
+  select.innerHTML = gl.candidates
+    .map((d) => `<option value="${escapeHtml(d)}"${d === gl.leader ? ' selected' : ''}>${escapeHtml(d)}</option>`)
+    .join('');
+  select.disabled = gl.locked;
+  select.title = gl.locked ? 'Unlock to change the leader' : '';
+
+  const btn = document.getElementById('lock-btn');
+  btn.textContent = gl.locked ? 'LOCKED' : 'Lock';
+  btn.classList.toggle('locked', gl.locked);
+  btn.title = gl.locked ? 'Click to unlock: follower trims stop tracking the leader' : 'Capture the leader gains and start compensating';
+
+  const problems = gl.signals.filter((s) => s.problem).length;
+  const failing = gl.signals.reduce((n, s) => n + s.followers.filter((f) => f.error).length, 0);
+  let summary = gl.locked ? `Followers are tracking ${escapeHtml(gl.leader)}.` : 'Unlocked - follower trims are left alone.';
+  if (problems) summary += ` ${problems} signal(s) not compensating.`;
+  if (failing) summary += ` ${failing} follower(s) failing.`;
+  document.getElementById('gainlock-summary').textContent = summary;
+
+  document.getElementById('gainlock-rows').innerHTML = gl.signals.map((s) => {
+    const drift = gl.locked && s.gain_db !== null && s.reference_db !== null ? s.gain_db - s.reference_db : null;
+    const preamp = s.leader_preamp ? `${escapeHtml(gl.leader)} · preamp ${s.leader_preamp}` : '<span class="muted">—</span>';
+    const gain = s.controllable
+      ? `<div class="gl-gain">
+           <button type="button" data-signal="${escapeHtml(s.name)}" data-delta="-1" title="Leader preamp down 1 dB">−1</button>
+           <input type="number" step="0.5" data-signal="${escapeHtml(s.name)}" value="${s.gain_db === null ? '' : s.gain_db.toFixed(1)}" title="Set the leader preamp (Enter)">
+           <button type="button" data-signal="${escapeHtml(s.name)}" data-delta="1" title="Leader preamp up 1 dB">+1</button>
+         </div>`
+      : '<span class="muted">—</span>';
+    const followers = s.followers.length
+      ? s.followers.map(followerChip).join('')
+      : '<span class="muted">none</span>';
+    const problem = s.problem ? `<div class="gl-problem">${escapeHtml(s.problem)}</div>` : '';
+    return `<tr>
+      <td>${escapeHtml(s.name)}${problem}</td>
+      <td>${preamp}</td>
+      <td>${gain}</td>
+      <td class="num">${gl.locked ? fmtDb(drift, true) : '<span class="muted">—</span>'}</td>
+      <td>${followers}</td>
+    </tr>`;
+  }).join('');
+
+  document.querySelectorAll('#gainlock-rows button[data-delta]').forEach((b) => {
+    b.addEventListener('click', () => setPreamp({ signal: b.dataset.signal, delta_db: Number(b.dataset.delta) }));
+  });
+  document.querySelectorAll('#gainlock-rows input[data-signal]').forEach((input) => {
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && input.value !== '') {
+        setPreamp({ signal: input.dataset.signal, gain_db: Number(input.value) });
+        input.blur();
+      }
+      if (ev.key === 'Escape') input.blur();
+    });
+  });
+}
+
+async function gainLockPost(path, body) {
+  const res = await fetch(`/api/gain-lock/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : '',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    setStatus(`Gain lock: ${err.error || res.status}`);
+    return;
+  }
+  setStatus('');
+  render(await fetchState());
+}
+
+function setPreamp(body) {
+  return gainLockPost('preamp', body);
+}
+
+document.getElementById('lock-btn').addEventListener('click', () => {
+  const gl = lastState.gain_lock;
+  if (!gl) return;
+  if (gl.locked) {
+    if (!confirm('Unlock? Follower trims will stop tracking the leader\'s preamps.')) return;
+    gainLockPost('unlock');
+  } else {
+    gainLockPost('lock');
+  }
+});
+
+document.getElementById('leader-select').addEventListener('change', (ev) => {
+  gainLockPost('leader', { device: ev.target.value });
+});
 
 // ---------------------------------------------------------------------
 // Mutations (devices + mappings)

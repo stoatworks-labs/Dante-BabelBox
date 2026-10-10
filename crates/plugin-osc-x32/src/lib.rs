@@ -33,7 +33,7 @@ use abi_stable::{
     sabi_trait::prelude::TD_Opaque,
     std_types::{RResult, RString, RVec},
 };
-use dante_babelbox_core::DeviceAdapter;
+use dante_babelbox_core::{channel_scheme, DeviceAdapter};
 use dante_babelbox_oca::{Ono, OcaClass, OcaObject, OcaObjectDescriptor, OcaValue};
 use dante_babelbox_oca_plugin_abi::{
     OcaEventFfi, OcaObjectDescriptorFfi, OcaValueFfi, PluginAdapter, PluginAdapterBox, PluginAdapter_TO,
@@ -51,7 +51,10 @@ const KIND: &str = "osc-x32";
 /// `pub const` today.
 const DEFAULT_X32_PORT: u16 = 10023;
 
-const CHANNELS: u16 = 24;
+/// Every headamp the protocol addresses - see `X32Adapter`'s module doc.
+const CHANNELS: u16 = dante_babelbox_preamp_adapter_osc::x32::HEADAMPS;
+/// Input channels with a trim the gain lock can move.
+const TRIM_INPUTS: u16 = dante_babelbox_preamp_adapter_osc::x32::TRIM_INPUTS;
 
 fn gain_ono(channel: u16) -> Ono {
     Ono(2 * (channel as u32 - 1) + 1)
@@ -190,15 +193,22 @@ impl PluginAdapter for X32PluginAdapter {
     }
 
     fn describe(&self) -> RVec<OcaObjectDescriptorFfi> {
-        let mut out = Vec::with_capacity(CHANNELS as usize * 2);
+        let mut out = Vec::with_capacity(CHANNELS as usize * 2 + TRIM_INPUTS as usize);
         for channel in 1..=CHANNELS {
             out.push(OcaObjectDescriptorFfi::from(descriptor(channel, true)));
             out.push(OcaObjectDescriptorFfi::from(descriptor(channel, false)));
         }
+        out.extend(channel_scheme::trim_descriptors(TRIM_INPUTS).into_iter().map(OcaObjectDescriptorFfi::from));
         out.into()
     }
 
     fn get_object(&mut self, ono: u32) -> RResult<OcaValueFfi, RString> {
+        if let Some(input) = channel_scheme::decode_trim_ono(Ono(ono), TRIM_INPUTS) {
+            return match self.runtime.block_on(self.inner.get_trim(input)) {
+                Ok(db) => RResult::ROk(OcaValueFfi::F32(db)),
+                Err(e) => RResult::RErr(e.to_string().into()),
+            };
+        }
         let Some((channel, is_gain)) = decode_ono(Ono(ono)) else {
             return RResult::RErr(format!("no such object 0x{ono:08x}").into());
         };
@@ -213,6 +223,15 @@ impl PluginAdapter for X32PluginAdapter {
     }
 
     fn set_object(&mut self, ono: u32, value: OcaValueFfi) -> RResult<(), RString> {
+        if let Some(input) = channel_scheme::decode_trim_ono(Ono(ono), TRIM_INPUTS) {
+            let OcaValueFfi::F32(v) = value else {
+                return RResult::RErr("trim requires an F32 value".into());
+            };
+            return match self.runtime.block_on(self.inner.set_trim(input, v)) {
+                Ok(()) => RResult::ROk(()),
+                Err(e) => RResult::RErr(e.to_string().into()),
+            };
+        }
         let Some((channel, is_gain)) = decode_ono(Ono(ono)) else {
             return RResult::RErr(format!("no such object 0x{ono:08x}").into());
         };
@@ -236,6 +255,16 @@ impl PluginAdapter for X32PluginAdapter {
     fn poll_events(&mut self) -> RVec<OcaEventFfi> {
         let mut queue = self.events.lock().unwrap();
         queue.drain(..).collect::<Vec<_>>().into()
+    }
+
+    fn nudge_object(&mut self, ono: u32, delta: f32) -> RResult<f32, RString> {
+        let Some(input) = channel_scheme::decode_trim_ono(Ono(ono), TRIM_INPUTS) else {
+            return RResult::RErr(format!("object 0x{ono:08x} has no relative control").into());
+        };
+        match self.runtime.block_on(self.inner.nudge_trim(input, delta)) {
+            Ok(applied) => RResult::ROk(applied),
+            Err(e) => RResult::RErr(e.to_string().into()),
+        }
     }
 }
 
@@ -291,12 +320,17 @@ mod tests {
     }
 
     #[test]
-    fn describe_reports_two_objects_per_channel() {
+    fn describe_reports_two_objects_per_headamp_and_a_trim_per_input() {
         let plugin = X32PluginAdapter::new("x32-1".into(), "127.0.0.1:0".parse().unwrap());
         let objects = PluginAdapter::describe(&plugin);
-        assert_eq!(objects.len(), CHANNELS as usize * 2);
+        assert_eq!(objects.len(), CHANNELS as usize * 2 + TRIM_INPUTS as usize);
         assert!(objects.iter().any(|o| o.role.as_str() == "Ch 3 Gain" && o.settable));
-        assert!(objects.iter().any(|o| o.role.as_str() == "Ch 3 Phantom" && o.settable));
+        assert!(objects.iter().any(|o| o.role.as_str() == "Ch 128 Phantom" && o.settable));
+        assert!(objects.iter().any(|o| o.role.as_str() == "In 32 Trim" && o.settable));
+        // Trim onos sit clear of the 2-per-headamp preamp onos.
+        for input in 1..=TRIM_INPUTS {
+            assert_eq!(decode_ono(channel_scheme::trim_ono(input)), None);
+        }
     }
 
     #[test]
@@ -368,8 +402,8 @@ mod tests {
                 // Spontaneous push: channel 3 gain and phantom both changed,
                 // unsolicited - exactly what a physical knob turn produces.
                 for (addr, arg) in [
-                    ("/headamp/03/gain", OscType::Float(-6.0)),
-                    ("/headamp/03/phantom", OscType::Int(1)),
+                    ("/headamp/002/gain", OscType::Float(0.25)),
+                    ("/headamp/002/phantom", OscType::Int(1)),
                 ] {
                     let msg = OscPacket::Message(OscMessage { addr: addr.to_string(), args: vec![arg] });
                     let bytes = rosc::encoder::encode(&msg).unwrap();
@@ -409,18 +443,18 @@ mod tests {
                     last_phantom = Some(event.value.clone());
                 }
             }
-            if last_gain == Some(OcaValueFfi::F32(-6.0)) && last_phantom == Some(OcaValueFfi::Bool(true)) {
+            if last_gain == Some(OcaValueFfi::F32(6.0)) && last_phantom == Some(OcaValueFfi::Bool(true)) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        assert_eq!(last_gain, Some(OcaValueFfi::F32(-6.0)), "expected the settled gain OcaEvent");
+        assert_eq!(last_gain, Some(OcaValueFfi::F32(6.0)), "expected the settled gain OcaEvent");
         assert_eq!(last_phantom, Some(OcaValueFfi::Bool(true)), "expected the settled phantom OcaEvent");
 
         assert!(matches!(plugin.set_object(gain_ono(3).into(), OcaValueFfi::F32(3.5)), RResult::ROk(())));
 
         let sent = server.join().unwrap();
-        assert!(matches!(sent, OscPacket::Message(m) if m.addr == "/headamp/03/gain"));
+        assert!(matches!(sent, OscPacket::Message(m) if m.addr == "/headamp/002/gain"));
 
         assert!(matches!(plugin.disconnect(), RResult::ROk(())));
     }

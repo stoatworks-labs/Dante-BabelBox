@@ -31,7 +31,10 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router as AxumRouter};
-use dante_babelbox_core::{channel_mapping, channel_scheme, ChannelMapping, DeviceConfig, PluginRegistry, PreampAddress, Router};
+use dante_babelbox_core::{
+    channel_mapping, channel_scheme, ChannelMapping, DeviceConfig, GainLock, GainLockStatus, PluginRegistry,
+    PreampAddress, Router,
+};
 use dante_babelbox_oca::OcaObjectDescriptor;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as AsyncMutex;
@@ -105,6 +108,8 @@ pub struct PatchState {
     /// "display source of truth" rather than derived by reverse-decoding
     /// Onos on every request.
     pub channel_mappings: Arc<RwLock<Vec<ChannelMapping>>>,
+    /// The gain-lock engine, when the config has a `[gain_lock]` table.
+    pub gain_lock: Option<Arc<GainLock>>,
 }
 
 #[derive(Serialize)]
@@ -135,12 +140,20 @@ impl From<&DeviceConfig> for DeviceView {
 struct StateResponse {
     devices: Vec<DeviceView>,
     mappings: Vec<ChannelMapping>,
+    /// Absent when no `[gain_lock]` is configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gain_lock: Option<GainLockStatus>,
 }
 
-fn snapshot(state: &PatchState) -> StateResponse {
+async fn snapshot(state: &PatchState) -> StateResponse {
+    let gain_lock = match &state.gain_lock {
+        Some(engine) => Some(engine.status().await),
+        None => None,
+    };
     StateResponse {
         devices: state.devices.list().iter().map(DeviceView::from).collect(),
         mappings: state.channel_mappings.read().unwrap().clone(),
+        gain_lock,
     }
 }
 
@@ -168,7 +181,7 @@ async fn index() -> Html<&'static str> {
 }
 
 async fn get_state(State(state): State<PatchState>) -> Json<StateResponse> {
-    Json(snapshot(&state))
+    Json(snapshot(&state).await)
 }
 
 #[derive(Deserialize)]
@@ -333,6 +346,57 @@ fn parse_endpoint(s: &str) -> Option<PreampAddress> {
     Some(PreampAddress::new(device, channel.parse().ok()?))
 }
 
+fn gain_lock(state: &PatchState) -> Result<&Arc<GainLock>, ApiError> {
+    state.gain_lock.as_ref().ok_or_else(|| not_found("no [gain_lock] is configured"))
+}
+
+async fn get_gain_lock(State(state): State<PatchState>) -> Result<Json<GainLockStatus>, ApiError> {
+    Ok(Json(gain_lock(&state)?.status().await))
+}
+
+async fn lock_gains(State(state): State<PatchState>) -> Result<Json<GainLockStatus>, ApiError> {
+    Ok(Json(gain_lock(&state)?.lock().await))
+}
+
+async fn unlock_gains(State(state): State<PatchState>) -> Result<Json<GainLockStatus>, ApiError> {
+    Ok(Json(gain_lock(&state)?.unlock().await))
+}
+
+#[derive(Deserialize)]
+struct LeaderRequest {
+    device: String,
+}
+
+async fn set_leader(
+    State(state): State<PatchState>,
+    Json(req): Json<LeaderRequest>,
+) -> Result<Json<GainLockStatus>, ApiError> {
+    gain_lock(&state)?.set_leader(&req.device).await.map(Json).map_err(conflict)
+}
+
+/// Either an absolute `gain_db` or a relative `delta_db`, not both.
+#[derive(Deserialize)]
+struct PreampRequest {
+    signal: String,
+    #[serde(default)]
+    gain_db: Option<f32>,
+    #[serde(default)]
+    delta_db: Option<f32>,
+}
+
+async fn set_preamp(
+    State(state): State<PatchState>,
+    Json(req): Json<PreampRequest>,
+) -> Result<Json<GainLockStatus>, ApiError> {
+    let engine = gain_lock(&state)?;
+    let result = match (req.gain_db, req.delta_db) {
+        (Some(gain), None) => engine.set_preamp(&req.signal, gain).await,
+        (None, Some(delta)) => engine.nudge_preamp(&req.signal, delta).await,
+        _ => return Err(bad_request("give exactly one of gain_db or delta_db")),
+    };
+    result.map(Json).map_err(bad_request)
+}
+
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<PatchState>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| push_state(socket, state))
 }
@@ -342,7 +406,7 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<PatchState>) -> im
 async fn push_state(mut socket: WebSocket, state: PatchState) {
     let mut last: Option<String> = None;
     loop {
-        let Ok(body) = serde_json::to_string(&snapshot(&state)) else {
+        let Ok(body) = serde_json::to_string(&snapshot(&state).await) else {
             return;
         };
         if last.as_deref() != Some(body.as_str()) {
@@ -372,6 +436,11 @@ pub fn app(state: PatchState) -> AxumRouter {
         .route("/api/devices/{id}", delete(remove_device))
         .route("/api/mappings", post(add_mapping))
         .route("/api/mappings/{id}", delete(remove_mapping))
+        .route("/api/gain-lock", get(get_gain_lock))
+        .route("/api/gain-lock/lock", post(lock_gains))
+        .route("/api/gain-lock/unlock", post(unlock_gains))
+        .route("/api/gain-lock/leader", post(set_leader))
+        .route("/api/gain-lock/preamp", post(set_preamp))
         .route("/ws", get(ws_handler))
         .with_state(state)
 }
@@ -456,6 +525,7 @@ mod tests {
             registry,
             descriptors: Arc::new(RwLock::new(HashMap::new())),
             channel_mappings: Arc::new(RwLock::new(Vec::new())),
+            gain_lock: None,
         }
     }
 
@@ -556,7 +626,7 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["channels"], 24, "expected osc-x32's documented default channel count");
+        assert_eq!(body["channels"], 128, "expected osc-x32's documented default channel count");
         assert!(state.devices.contains("x32-foh"));
     }
 
@@ -773,4 +843,132 @@ mod tests {
         assert_eq!(body["devices"].as_array().unwrap().len(), 1);
         assert_eq!(body["mappings"].as_array().unwrap().len(), 1);
     }
+
+    /// A desk with one preamp and one trim, enough to drive the gain-lock API.
+    struct LockDesk {
+        id: String,
+        tx: broadcast::Sender<OcaEvent>,
+        gain: Arc<StdMutex<f32>>,
+        trim: Arc<StdMutex<f32>>,
+    }
+
+    #[async_trait]
+    impl LocalAdapter for LockDesk {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        async fn connect(&mut self) -> AdapterResult<()> {
+            Ok(())
+        }
+        async fn disconnect(&mut self) -> AdapterResult<()> {
+            Ok(())
+        }
+        async fn identify(&mut self) -> AdapterResult<DeviceInfo> {
+            Err(AdapterError::Protocol("unused".into()))
+        }
+        fn describe(&self) -> Vec<OcaObjectDescriptor> {
+            vec![channel_scheme::descriptor(1, channel_scheme::Field::Gain), channel_scheme::trim_descriptor(1)]
+        }
+        async fn get_object(&mut self, _ono: Ono) -> AdapterResult<OcaValue> {
+            Ok(OcaValue::F32(*self.gain.lock().unwrap()))
+        }
+        async fn set_object(&mut self, _ono: Ono, value: OcaValue) -> AdapterResult<()> {
+            *self.gain.lock().unwrap() = value.as_f32().unwrap();
+            Ok(())
+        }
+        fn subscribe(&self) -> broadcast::Receiver<OcaEvent> {
+            self.tx.subscribe()
+        }
+        async fn nudge_object(&mut self, _ono: Ono, delta: f32) -> AdapterResult<f32> {
+            *self.trim.lock().unwrap() += delta;
+            Ok(delta)
+        }
+    }
+
+    async fn gain_lock_state() -> (PatchState, Arc<StdMutex<f32>>) {
+        let state = test_state();
+        let mon_trim = Arc::new(StdMutex::new(0.0));
+        for (id, trim) in [("foh", Arc::new(StdMutex::new(0.0))), ("mon", mon_trim.clone())] {
+            let desk = LockDesk { id: id.into(), tx: broadcast::channel(4).0, gain: Arc::new(StdMutex::new(20.0)), trim };
+            state.router.register_device(id, Arc::new(AsyncMutex::new(Box::new(desk) as Box<dyn LocalAdapter>))).await;
+        }
+        let member = |device: &str, preamp: Option<u16>, input: Option<u16>| dante_babelbox_core::gain_lock::Member {
+            device: device.into(),
+            preamp,
+            input,
+        };
+        let config = dante_babelbox_core::GainLockConfig {
+            leader: "foh".into(),
+            signals: vec![dante_babelbox_core::gain_lock::Signal {
+                name: "Kick".into(),
+                members: vec![member("foh", Some(1), Some(1)), member("mon", Some(1), Some(1))],
+            }],
+            poll_ms: None,
+            lock_on_start: false,
+        };
+        let engine = GainLock::new(Arc::clone(&state.router), config).await;
+        (PatchState { gain_lock: Some(engine), ..state }, mon_trim)
+    }
+
+    #[tokio::test]
+    async fn gain_lock_routes_are_not_found_without_a_gain_lock_table() {
+        let app = app(test_state());
+        let (status, _) = call(&app, get_req("/api/gain-lock")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = call(&app, post("/api/gain-lock/lock", "")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (_, body) = call(&app, get_req("/api/state")).await;
+        assert!(body.get("gain_lock").is_none());
+    }
+
+    #[tokio::test]
+    async fn lock_then_set_the_leader_preamp_compensates_the_follower() {
+        let (state, mon_trim) = gain_lock_state().await;
+        let app = app(state);
+
+        let (status, body) = call(&app, post("/api/gain-lock/lock", "")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["locked"], true);
+        assert_eq!(body["signals"][0]["reference_db"], 20.0);
+
+        let (status, body) = call(&app, post("/api/gain-lock/preamp", r#"{"signal":"Kick","gain_db":24.0}"#)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(*mon_trim.lock().unwrap(), -4.0);
+        assert_eq!(body["signals"][0]["followers"][0]["applied_db"], -4.0);
+
+        let (status, _) = call(&app, post("/api/gain-lock/preamp", r#"{"signal":"Kick","delta_db":-1.0}"#)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(*mon_trim.lock().unwrap(), -3.0);
+
+        let (_, body) = call(&app, get_req("/api/state")).await;
+        assert_eq!(body["gain_lock"]["signals"][0]["gain_db"], 23.0);
+    }
+
+    #[tokio::test]
+    async fn the_leader_cannot_be_changed_while_locked() {
+        let (state, _) = gain_lock_state().await;
+        let app = app(state);
+        call(&app, post("/api/gain-lock/lock", "")).await;
+        let (status, _) = call(&app, post("/api/gain-lock/leader", r#"{"device":"mon"}"#)).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+
+        call(&app, post("/api/gain-lock/unlock", "")).await;
+        let (status, body) = call(&app, post("/api/gain-lock/leader", r#"{"device":"mon"}"#)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["leader"], "mon");
+        assert_eq!(body["signals"][0]["followers"][0]["device"], "foh");
+    }
+
+    #[tokio::test]
+    async fn a_preamp_request_needs_exactly_one_of_gain_or_delta() {
+        let (state, _) = gain_lock_state().await;
+        let app = app(state);
+        let (status, _) = call(&app, post("/api/gain-lock/preamp", r#"{"signal":"Kick","gain_db":1,"delta_db":1}"#)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = call(&app, post("/api/gain-lock/preamp", r#"{"signal":"Kick"}"#)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = call(&app, post("/api/gain-lock/preamp", r#"{"signal":"Nope","gain_db":1}"#)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
 }

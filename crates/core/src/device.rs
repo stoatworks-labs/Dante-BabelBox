@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 /// default.
 pub fn default_channel_count(kind: &str) -> Option<u16> {
     match kind {
-        "osc-x32" => Some(24),
+        "osc-x32" => Some(128),
         "osc-wing" => Some(8),
         "ah-tcp" => Some(64),
         "dlive-tcp" => Some(128),
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn default_channel_count_covers_every_known_kind() {
-        assert_eq!(default_channel_count("osc-x32"), Some(24));
+        assert_eq!(default_channel_count("osc-x32"), Some(128));
         assert_eq!(default_channel_count("osc-wing"), Some(8));
         assert_eq!(default_channel_count("ah-tcp"), Some(64));
         assert_eq!(default_channel_count("dlive-tcp"), Some(128));
@@ -111,6 +111,6 @@ mod tests {
             is_virtual: false,
             channels: None,
         };
-        assert_eq!(device.channel_count(), Some(24));
+        assert_eq!(device.channel_count(), Some(128));
     }
 }

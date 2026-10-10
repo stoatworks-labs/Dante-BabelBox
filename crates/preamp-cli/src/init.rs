@@ -154,6 +154,7 @@ pub async fn probe_and_build(ips: Vec<IpAddr>, per_attempt_timeout: Duration) ->
     Config {
         devices,
         mappings: Vec::new(),
+        gain_lock: None,
     }
 }
 
@@ -406,6 +407,7 @@ mod tests {
                 },
             ],
             mappings: Vec::new(),
+            gain_lock: None,
         };
 
         let path = std::env::temp_dir().join(format!("init-roundtrip-{}.toml", std::process::id()));
@@ -456,6 +458,7 @@ mod tests {
                 to: PreampAddress::new("console", 5),
                 bidirectional: true,
             }],
+            gain_lock: None,
         };
 
         let path = std::env::temp_dir().join(format!("init-inferred-roundtrip-{}.toml", std::process::id()));

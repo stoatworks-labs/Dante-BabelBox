@@ -29,6 +29,19 @@
 //! in a reply as the value, which matches every worked example in the
 //! spec and degrades gracefully if WING replies with more or fewer
 //! leading fields than expected.
+//!
+//! Trim, for the gain lock's follower side, is from the later "WING Remote
+//! Protocols" V3.0.6-27 (same author): `/ch/<1-40>/in/set/trim`, `F -18..18,
+//! 361 steps` (0.1 dB), set as a float in dB and replied to as `,sff`
+//! (text, raw 0..1, dB - the last float is the dB value, as above). It sits
+//! in the channel strip, so it applies whatever the channel's source is.
+//! WING "does not echo data sent over UDP by the client application", so a
+//! write updates this adapter's own cache, and since only one subscriber is
+//! allowed a cached value can go stale without warning - which is why
+//! [`DeviceAdapter::nudge_trim`] always reads the live trim before writing.
+//! The native protocol (TCP 2222) has a step token (`0xd9`) that would make
+//! the move truly relative, but what one step is worth and what happens at
+//! the range limit aren't documented; it's left for a bench session.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -37,7 +50,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use dante_babelbox_core::{
-    ChangedFields, AdapterError, AdapterResult, DeviceAdapter, DeviceInfo, PreampAddress, PreampEvent, PreampState,
+    ChangedFields, AdapterError, AdapterResult, DbLaw, DeviceAdapter, DeviceInfo, PreampAddress, PreampEvent,
+    PreampState,
 };
 use rosc::{OscMessage, OscPacket, OscType};
 use tokio::net::UdpSocket;
@@ -45,12 +59,32 @@ use tokio::sync::{broadcast, oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
+/// `/ch/N/in/set/trim  F  -18..18  361 steps`.
+pub const TRIM_LAW: DbLaw = DbLaw::new(-18.0, 18.0, 0.1);
+/// Channels 1-40.
+pub const TRIM_INPUTS: u16 = 40;
+
+const READ_ATTEMPTS: usize = 20;
+const READ_POLL: Duration = Duration::from_millis(50);
+/// How long the receive loop waits after a failed read before trying again.
+const READ_ERROR_BACKOFF: Duration = Duration::from_millis(250);
+
+type TrimCache = Arc<Mutex<HashMap<u16, f32>>>;
+
+/// What the receive loop keeps current: preamp channels and input trims.
+#[derive(Clone)]
+struct Caches {
+    preamps: Arc<Mutex<HashMap<u16, PreampState>>>,
+    trims: TrimCache,
+}
+
 pub struct WingAdapter {
     id: Arc<str>,
     remote: SocketAddr,
     socket: Option<Arc<UdpSocket>>,
     tx: broadcast::Sender<PreampEvent>,
     state: Arc<Mutex<HashMap<u16, PreampState>>>,
+    trims: TrimCache,
     pending_identify: Arc<StdMutex<Option<oneshot::Sender<DeviceInfo>>>>,
     cancel: CancellationToken,
 }
@@ -64,6 +98,7 @@ impl WingAdapter {
             socket: None,
             tx,
             state: Arc::new(Mutex::new(HashMap::new())),
+            trims: Arc::new(Mutex::new(HashMap::new())),
             pending_identify: Arc::new(StdMutex::new(None)),
             cancel: CancellationToken::new(),
         }
@@ -74,6 +109,13 @@ impl WingAdapter {
             return Err(AdapterError::UnsupportedChannel(channel));
         }
         Ok(format!("/io/in/LCL/{channel}/{field}"))
+    }
+
+    fn trim_path(input: u16) -> AdapterResult<String> {
+        if !(1..=TRIM_INPUTS).contains(&input) {
+            return Err(AdapterError::UnsupportedChannel(input));
+        }
+        Ok(format!("/ch/{input}/in/set/trim"))
     }
 
     async fn send(&self, addr: &str, args: Vec<OscType>) -> AdapterResult<()> {
@@ -116,7 +158,7 @@ impl DeviceAdapter for WingAdapter {
             Arc::clone(&socket),
             Arc::clone(&self.id),
             self.tx.clone(),
-            Arc::clone(&self.state),
+            Caches { preamps: Arc::clone(&self.state), trims: Arc::clone(&self.trims) },
             Arc::clone(&self.pending_identify),
             self.remote.ip(),
             self.cancel.clone(),
@@ -143,7 +185,13 @@ impl DeviceAdapter for WingAdapter {
 
     async fn set_gain(&mut self, channel: u16, gain_db: f32) -> AdapterResult<()> {
         let addr = Self::channel_path(channel, "g")?;
-        self.send(&addr, vec![OscType::Float(gain_db)]).await
+        self.send(&addr, vec![OscType::Float(gain_db)]).await?;
+        // WING doesn't echo our own writes. Only refresh a channel already
+        // read - inserting one would make up a phantom value (ChangedFields).
+        if let Some(entry) = self.state.lock().await.get_mut(&channel) {
+            entry.gain_db = gain_db;
+        }
+        Ok(())
     }
 
     async fn set_phantom(&mut self, channel: u16, on: bool) -> AdapterResult<()> {
@@ -152,7 +200,7 @@ impl DeviceAdapter for WingAdapter {
     }
 
     async fn get_state(&mut self, channel: u16) -> AdapterResult<PreampState> {
-        if let Some(state) = self.state.lock().await.get(&channel) {
+        if let Some(state) = self.state.lock().await.get(&channel).filter(|s| s.gain_known()) {
             return Ok(*state);
         }
         self.send(&Self::channel_path(channel, "g")?, vec![]).await?;
@@ -160,7 +208,7 @@ impl DeviceAdapter for WingAdapter {
 
         for _ in 0..20 {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            if let Some(state) = self.state.lock().await.get(&channel) {
+            if let Some(state) = self.state.lock().await.get(&channel).filter(|s| s.gain_known()) {
                 return Ok(*state);
             }
         }
@@ -171,6 +219,46 @@ impl DeviceAdapter for WingAdapter {
 
     fn subscribe(&self) -> broadcast::Receiver<PreampEvent> {
         self.tx.subscribe()
+    }
+
+    fn trim_inputs(&self) -> u16 {
+        TRIM_INPUTS
+    }
+
+    /// Always asks the console: a second app taking the single subscription
+    /// would leave a cached trim silently stale.
+    async fn get_trim(&mut self, input: u16) -> AdapterResult<f32> {
+        let addr = Self::trim_path(input)?;
+        self.trims.lock().await.remove(&input);
+        self.send(&addr, vec![]).await?;
+        for _ in 0..READ_ATTEMPTS {
+            tokio::time::sleep(READ_POLL).await;
+            if let Some(trim) = self.trims.lock().await.get(&input) {
+                return Ok(*trim);
+            }
+        }
+        Err(AdapterError::Protocol(format!("no reply for channel {input} trim")))
+    }
+
+    async fn set_trim(&mut self, input: u16, trim_db: f32) -> AdapterResult<()> {
+        let addr = Self::trim_path(input)?;
+        let trim_db = TRIM_LAW.quantize(trim_db);
+        self.send(&addr, vec![OscType::Float(trim_db)]).await?;
+        self.trims.lock().await.insert(input, trim_db);
+        Ok(())
+    }
+
+    async fn nudge_trim(&mut self, input: u16, delta_db: f32) -> AdapterResult<f32> {
+        Self::trim_path(input)?;
+        if !TRIM_LAW.moves(delta_db) {
+            return Ok(0.0);
+        }
+        let current = self.get_trim(input).await?;
+        let (target, applied) = TRIM_LAW.nudge(current, delta_db);
+        if applied != 0.0 {
+            self.set_trim(input, target).await?;
+        }
+        Ok(applied)
     }
 }
 
@@ -202,13 +290,19 @@ fn last_numeric_value(args: &[OscType]) -> Option<f32> {
     })
 }
 
+/// `/ch/7/in/set/trim` -> `7`.
+fn parse_trim_addr(addr: &str) -> Option<u16> {
+    let rest = addr.strip_prefix("/ch/")?.strip_suffix("/in/set/trim")?;
+    rest.parse::<u16>().ok().filter(|i| (1..=TRIM_INPUTS).contains(i))
+}
+
 type PendingIdentify = Arc<StdMutex<Option<oneshot::Sender<DeviceInfo>>>>;
 
 fn spawn_receive_loop(
     socket: Arc<UdpSocket>,
     id: Arc<str>,
     tx: broadcast::Sender<PreampEvent>,
-    state: Arc<Mutex<HashMap<u16, PreampState>>>,
+    caches: Caches,
     pending_identify: PendingIdentify,
     remote_ip: IpAddr,
     cancel: CancellationToken,
@@ -221,14 +315,22 @@ fn spawn_receive_loop(
                 result = socket.recv(&mut buf) => match result {
                     Ok(len) => len,
                     Err(e) => {
-                        warn!(device = %id, error = %e, "WING OSC socket read failed, stopping receive loop");
-                        return;
+                        // A connected UDP socket reports an ICMP "port
+                        // unreachable" as an error on the next read - which
+                        // is what a console rebooting looks like. That used
+                        // to end this loop, leaving the adapter deaf to the
+                        // desk for good once it came back. Ride it out.
+                        debug!(device = %id, error = %e, "WING OSC socket read failed; retrying");
+                        tokio::select! {
+                            _ = cancel.cancelled() => return,
+                            _ = tokio::time::sleep(READ_ERROR_BACKOFF) => continue,
+                        }
                     }
                 },
             };
             match rosc::decoder::decode_udp(&buf[..len]) {
                 Ok((_, OscPacket::Message(msg))) => {
-                    handle_message(msg, &id, &tx, &state, &pending_identify, remote_ip).await
+                    handle_message(msg, &id, &tx, &caches, &pending_identify, remote_ip).await
                 }
                 Ok((_, OscPacket::Bundle(_))) => {
                     debug!(device = %id, "ignoring unexpected OSC bundle (WING doesn't send these)");
@@ -264,13 +366,21 @@ async fn handle_message(
     msg: OscMessage,
     id: &Arc<str>,
     tx: &broadcast::Sender<PreampEvent>,
-    state: &Arc<Mutex<HashMap<u16, PreampState>>>,
+    caches: &Caches,
     pending_identify: &PendingIdentify,
     remote_ip: IpAddr,
 ) {
     if let Some(info) = parse_info_reply(&msg, remote_ip) {
         if let Some(sender) = pending_identify.lock().unwrap().take() {
             let _ = sender.send(info);
+        }
+        return;
+    }
+
+    if let Some(input) = parse_trim_addr(&msg.addr) {
+        if let Some(trim_db) = last_numeric_value(&msg.args) {
+            debug!(device = %id, input, trim_db, "WING trim update");
+            caches.trims.lock().await.insert(input, trim_db);
         }
         return;
     }
@@ -283,12 +393,8 @@ async fn handle_message(
     };
 
     let (new_state, changed) = {
-        let mut guard = state.lock().await;
-        let entry = guard.entry(channel).or_insert(PreampState {
-            gain_db: 0.0,
-            phantom: false,
-            pad: None,
-        });
+        let mut guard = caches.preamps.lock().await;
+        let entry = guard.entry(channel).or_insert(PreampState::UNREAD);
         // One field per message; see ChangedFields.
         let changed = match field {
             HeadampField::Gain => {
@@ -320,9 +426,10 @@ fn spawn_subscription_renewal(socket: Arc<UdpSocket>, cancel: CancellationToken)
             });
             match rosc::encoder::encode(&packet) {
                 Ok(bytes) => {
+                    // Keep renewing through an outage, or the adapter stays
+                    // unsubscribed once the desk is back.
                     if let Err(e) = socket.send(&bytes).await {
-                        warn!(error = %e, "failed to renew WING OSC subscription, stopping");
-                        return;
+                        debug!(error = %e, "failed to renew WING OSC subscription; will retry");
                     }
                 }
                 Err(e) => warn!(error = ?e, "failed to encode WING subscription request"),
@@ -339,6 +446,58 @@ fn spawn_subscription_renewal(socket: Arc<UdpSocket>, cancel: CancellationToken)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trim_paths_round_trip() {
+        assert_eq!(WingAdapter::trim_path(7).unwrap(), "/ch/7/in/set/trim");
+        assert_eq!(parse_trim_addr("/ch/40/in/set/trim"), Some(40));
+        assert!(WingAdapter::trim_path(41).is_err());
+        assert_eq!(parse_trim_addr("/ch/41/in/set/trim"), None);
+        assert_eq!(parse_trim_addr("/aux/1/in/set/trim"), None);
+    }
+
+    /// Receives the next message that isn't the `/*s` subscription renewal.
+    async fn recv_ignoring_subscription(mock: &UdpSocket) -> (OscMessage, SocketAddr) {
+        let mut buf = [0u8; 512];
+        loop {
+            let (len, from) = tokio::time::timeout(Duration::from_secs(2), mock.recv_from(&mut buf))
+                .await
+                .expect("timed out waiting for the adapter")
+                .unwrap();
+            if let (_, OscPacket::Message(m)) = rosc::decoder::decode_udp(&buf[..len]).unwrap() {
+                if m.addr != "/*s" {
+                    return (m, from);
+                }
+            }
+        }
+    }
+
+    /// The reply shape is WING's documented `,sff` - text, raw 0..1, dB -
+    /// and the write is a float in dB.
+    #[tokio::test]
+    async fn nudge_trim_reads_the_sff_reply_then_writes_decibels() {
+        let mock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut adapter = WingAdapter::new("wing-1", mock.local_addr().unwrap());
+        adapter.connect().await.unwrap();
+
+        let console = tokio::spawn(async move {
+            let (get, from) = recv_ignoring_subscription(&mock).await;
+            assert_eq!(get.addr, "/ch/12/in/set/trim");
+            assert!(get.args.is_empty());
+            let reply = OscPacket::Message(OscMessage {
+                addr: "/ch/12/in/set/trim".into(),
+                args: vec![OscType::String("1.5".into()), OscType::Float(TRIM_LAW.to_unit(1.5)), OscType::Float(1.5)],
+            });
+            mock.send_to(&rosc::encoder::encode(&reply).unwrap(), from).await.unwrap();
+            recv_ignoring_subscription(&mock).await.0
+        });
+
+        assert_eq!(adapter.nudge_trim(12, -2.2).await.unwrap(), -2.2);
+        let set = console.await.unwrap();
+        assert_eq!(set.addr, "/ch/12/in/set/trim");
+        let [OscType::Float(v)] = set.args.as_slice() else { panic!("expected one float, got {:?}", set.args) };
+        assert!((v - -0.7).abs() < 1e-5, "wrote {v}");
+    }
 
     #[test]
     fn channel_path_covers_lcl_1_to_8_only() {

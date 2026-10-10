@@ -92,3 +92,20 @@ bidirectional = true
 from = { device = "dlive-mixrack", channel = 20 }
 to   = { device = "dm3-foh", channel = 5 }
 bidirectional = true
+
+# Gain compensation ("gain lock") - see docs/GAIN-LOCK.md. One desk leads the
+# shared preamps; while locked, each follower desk's input trim takes the
+# opposite of every leader gain change. Followers today: osc-x32 (inputs 1-32)
+# and osc-wing (channels 1-40). Uncomment to try it with the devices above:
+#
+# [gain_lock]
+# leader = "dlive-mixrack"
+# lock_on_start = false     # true: lock as soon as the devices connect
+# poll_ms = 0               # >0: also re-read leader gains, for a leader that doesn't push
+#
+# [[gain_lock.signal]]
+# name = "Kick In"
+# members = [
+#   { device = "dlive-mixrack", preamp = 1 },   # the leader's preamp (a dLive socket)
+#   { device = "x32-monitors", input = 1 },     # the follower's input channel trim
+# ]

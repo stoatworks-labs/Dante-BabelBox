@@ -183,7 +183,8 @@ UI don't distinguish between them.
 
 Copy [`bridge.example.toml`](bridge.example.toml) as a starting point.
 The file has two kinds of blocks: `[[device]]` (what's on the network)
-and `[[mapping]]` (what should track what).
+and `[[mapping]]` (what should track what), plus an optional
+`[gain_lock]` table (gain compensation across desks - see below).
 
 ### `[[device]]`
 
@@ -242,8 +243,10 @@ bidirectional = true    # optional, defaults to false (one-way: from -> to)
 protocol's native addressing unit is — **it is not always a mixing
 channel number**:
 
-- **X32-family (`osc-x32`)**: headamp index 1–24 (1–8 local XLR, 9–16
-  AES50-A, 17–24 AES50-B).
+- **X32-family (`osc-x32`)**: headamp index + 1, so 1–128: 1–32 the
+  console's local inputs, 33–80 AES50-A, 81–128 AES50-B (the protocol's
+  `/headamp/000`…`/127`). Up to 0.4.1 this was 1–24 and wrong for an X32
+  - see the README's status table.
 - **Wing (`osc-wing`)**: 1–8, the console's own built-in LCL preamps
   only — AES50/StageConnect-attached stageboxes aren't covered yet.
 - **AHM (`ah-tcp`)**: 1-based channel index as configured on the unit.
@@ -259,6 +262,31 @@ You can chain more than one mapping off the same device/channel to fan a
 single preamp's changes out to several peers, and mark any mapping
 `bidirectional = true` to let either side drive the other (with echo
 suppression preventing feedback loops).
+
+### `[gain_lock]`
+
+Gain compensation: one desk leads the shared preamps, and while the system
+is locked every follower desk's digital trim takes the opposite of each
+leader gain change, so the followers' levels don't move.
+
+```toml
+[gain_lock]
+leader = "foh"
+# lock_on_start = true
+# poll_ms = 500          # for a leader that doesn't push changes
+
+[[gain_lock.signal]]
+name = "Kick In"
+members = [
+  { device = "foh", preamp = 1 },   # the leader's preamp, in its adapter's numbering (above)
+  { device = "mon", input = 1 },    # the follower's input channel, whose trim moves
+]
+```
+
+Followers today are `osc-x32` (input channels 1–32) and `osc-wing`
+(channels 1–40); any device with a preamp can lead. The whole picture - the
+rules the engine keeps, which desks can do what and why, and a checklist for
+a first real rig - is in [docs/GAIN-LOCK.md](docs/GAIN-LOCK.md).
 
 ## Troubleshooting
 

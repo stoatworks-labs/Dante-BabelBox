@@ -174,7 +174,7 @@ impl DeviceAdapter for Dm3Adapter {
 
     async fn get_state(&mut self, channel: u16) -> AdapterResult<PreampState> {
         Self::check_channel(channel)?;
-        if let Some(state) = self.state.lock().await.get(&channel) {
+        if let Some(state) = self.state.lock().await.get(&channel).filter(|s| s.gain_known()) {
             return Ok(*state);
         }
         // Best-effort per the module doc comment - "get" is not shown in
@@ -184,7 +184,7 @@ impl DeviceAdapter for Dm3Adapter {
 
         for _ in 0..20 {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            if let Some(state) = self.state.lock().await.get(&channel) {
+            if let Some(state) = self.state.lock().await.get(&channel).filter(|s| s.gain_known()) {
                 return Ok(*state);
             }
         }
@@ -310,11 +310,7 @@ async fn handle_message(
 
     let (new_state, changed) = {
         let mut guard = state.lock().await;
-        let entry = guard.entry(channel).or_insert(PreampState {
-            gain_db: 0.0,
-            phantom: false,
-            pad: None,
-        });
+        let entry = guard.entry(channel).or_insert(PreampState::UNREAD);
         // One field per message; see ChangedFields.
         let changed = match field {
             HeadampField::Gain => {

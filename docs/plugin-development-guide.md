@@ -140,6 +140,29 @@ won't be found by today's device+channel mapping shorthand. Widening
 extension; it just doesn't exist yet, and this guide won't pretend
 otherwise.
 
+### Trim objects and the gain lock
+
+A desk that can be a gain-lock **follower** (see [GAIN-LOCK.md](GAIN-LOCK.md)) exposes one
+`settable` `OcaClass::Gain` object per input channel with role **`"In {input} Trim"`**, which is
+how the gain lock finds it. Put its `Ono` at `channel_scheme::trim_ono(input)`
+(`TRIM_ONO_BASE + input`), clear of the preamp objects. An input channel is numbered
+independently of the preamps (X32 input 1 may be fed by headamp 33), so the two can't share a
+channel index.
+
+Then implement `nudge_object(ono, delta)`. It moves the trim by `delta` dB **from the device's
+live value** and returns the change actually made after the device's range and step: `0.0` at a
+limit, or for a delta under half a step. Use the protocol's own increment/decrement if it has
+one. Otherwise read the live value immediately before writing, never a cached one a missed push
+could have left stale. `dante_babelbox_core::DbLaw` does the range-and-step arithmetic. A plugin
+wrapping a `DeviceAdapter` through `LegacyPluginBridge` gets all of this by implementing
+`trim_inputs`/`get_trim`/`set_trim`/`nudge_trim` on the adapter. The X32 and Wing adapters in
+`crates/preamp-adapter-osc` are worked examples.
+
+`nudge_object` has a default body that answers "not supported", so a plugin with no trim needn't
+implement it. Because it was added to `PluginAdapter`, though, a plugin **binary** built before it
+is refused at load (`abi_stable`: "too many fields") and needs a rebuild. That's the same as a
+toolchain change.
+
 ## The FFI contract
 
 `abi_stable` gives you two different mechanisms, used for two different
@@ -177,6 +200,9 @@ pub trait PluginAdapter: Send + Sync {
     fn set_object(&mut self, ono: u32, value: OcaValueFfi) -> RResult<(), RString>;
     #[sabi(last_prefix_field)]
     fn poll_events(&mut self) -> RVec<OcaEventFfi>;
+    /// Relative move of a trim object; default body answers "not supported".
+    /// See "Trim objects and the gain lock" above.
+    fn nudge_object(&mut self, ono: u32, delta: f32) -> RResult<f32, RString> { ... }
 }
 ```
 

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use dante_babelbox_core::{ChannelMapping, DeviceConfig};
+use dante_babelbox_core::{ChannelMapping, DeviceConfig, GainLockConfig};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -11,6 +11,10 @@ pub struct Config {
     pub devices: Vec<DeviceConfig>,
     #[serde(default, rename = "mapping")]
     pub mappings: Vec<ChannelMapping>,
+    /// Gain compensation across desks - see `dante_babelbox_core::gain_lock`.
+    /// Read at startup only; a hot-reload applies mapping changes, not this.
+    #[serde(default)]
+    pub gain_lock: Option<GainLockConfig>,
 }
 
 impl Config {
@@ -38,6 +42,11 @@ impl Config {
                 if !ids.contains(addr.device_id.as_str()) {
                     bail!("mapping references unknown device id '{}'", addr.device_id);
                 }
+            }
+        }
+        if let Some(gain_lock) = &self.gain_lock {
+            if let Err(e) = gain_lock.validate(|id| ids.contains(id)) {
+                bail!(e);
             }
         }
         Ok(())
@@ -192,6 +201,52 @@ channels = 8
         assert!(cfg.devices[0].is_virtual);
         assert_eq!(cfg.devices[0].address, None);
         assert_eq!(cfg.devices[0].channels, Some(8));
+    }
+
+    #[test]
+    fn parses_a_gain_lock_table() {
+        let text = format!(
+            "{EXAMPLE}{}",
+            r#"
+[gain_lock]
+leader = "sq-foh"
+lock_on_start = true
+
+[[gain_lock.signal]]
+name = "Kick In"
+members = [
+  { device = "sq-foh", preamp = 1 },
+  { device = "x32-monitors", input = 1 },
+]
+"#
+        );
+        let path = write_temp(&text);
+        let cfg = Config::load(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        let gain_lock = cfg.gain_lock.unwrap();
+        assert_eq!(gain_lock.leader, "sq-foh");
+        assert!(gain_lock.lock_on_start);
+        assert_eq!(gain_lock.signals[0].members[1].input, Some(1));
+    }
+
+    #[test]
+    fn rejects_a_gain_lock_signal_with_no_preamp_on_the_leader() {
+        let text = format!(
+            "{EXAMPLE}{}",
+            r#"
+[gain_lock]
+leader = "sq-foh"
+
+[[gain_lock.signal]]
+name = "Kick In"
+members = [ { device = "x32-monitors", input = 1 } ]
+"#
+        );
+        let path = write_temp(&text);
+        let err = Config::load(&path).unwrap_err();
+        std::fs::remove_file(&path).ok();
+        assert!(format!("{err:#}").contains("no preamp on the leader"), "{err:#}");
     }
 
     #[tokio::test]

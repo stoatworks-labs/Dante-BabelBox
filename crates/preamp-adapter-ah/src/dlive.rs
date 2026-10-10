@@ -224,7 +224,7 @@ impl DeviceAdapter for DliveAdapter {
     }
 
     async fn get_state(&mut self, channel: u16) -> AdapterResult<PreampState> {
-        if let Some(state) = self.state.lock().await.get(&channel) {
+        if let Some(state) = self.state.lock().await.get(&channel).filter(|s| s.gain_known()) {
             return Ok(*state);
         }
         let mp = Self::socket_number(channel)?;
@@ -239,7 +239,7 @@ impl DeviceAdapter for DliveAdapter {
 
         for _ in 0..20 {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            if let Some(state) = self.state.lock().await.get(&channel) {
+            if let Some(state) = self.state.lock().await.get(&channel).filter(|s| s.gain_known()) {
                 return Ok(*state);
             }
         }
@@ -422,11 +422,7 @@ async fn handle_message(
 
     let (new_state, changed) = {
         let mut guard = state.lock().await;
-        let entry = guard.entry(channel).or_insert(PreampState {
-            gain_db: 0.0,
-            phantom: false,
-            pad: None,
-        });
+        let entry = guard.entry(channel).or_insert(PreampState::UNREAD);
         // The message names ONE field. The rest of `entry` is carried context,
         // and on first contact it is the default rather than a reading.
         let changed = match update {
@@ -574,6 +570,45 @@ mod tests {
         let mut ahm_opcode = SYSEX_HEADER.to_vec();
         ahm_opcode.extend_from_slice(&[0x00, 0x0A, 0x00, b'F', b'O', b'H', 0xF7]);
         assert!(parse_identify_reply(&ahm_opcode, addr).is_none());
+    }
+
+    /// A phantom report creates the channel's cache entry; its gain is not a
+    /// reading. `get_state` used to answer 0 dB from that entry - the value
+    /// the gain lock would then have locked on. It must ask the desk instead.
+    #[tokio::test]
+    async fn get_state_after_a_phantom_only_report_asks_for_the_gain() {
+        use tokio::io::AsyncReadExt as _;
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut adapter = DliveAdapter::new("dlive-1", listener.local_addr().unwrap());
+        let mut events = adapter.subscribe();
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            // 48V on for socket 12 (MP 0x0B), unsolicited.
+            let mut msg = SYSEX_HEADER.to_vec();
+            msg.extend_from_slice(&[0x00, OP_48V_STATUS, 0x0B, 0x7F, 0xF7]);
+            socket.write_all(&msg).await.unwrap();
+            // Answer the gain request once it arrives.
+            let mut seen = Vec::new();
+            let mut buf = [0u8; 256];
+            let get_gain = [MIDI_N, 0x05, OP_GET_GAIN, PARAM_GAIN, 0x0B, 0xF7];
+            while !seen.windows(get_gain.len()).any(|w| w == get_gain) {
+                let n = socket.read(&mut buf).await.unwrap();
+                seen.extend_from_slice(&buf[..n]);
+            }
+            socket.write_all(&[0xE0 | MIDI_N, 0x0B, 0x40]).await.unwrap();
+            socket
+        });
+
+        adapter.connect().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), events.recv()).await.unwrap().unwrap(); // the 48V report
+
+        let state = adapter.get_state(12).await.unwrap();
+        assert_eq!(state.gain_db, gain_byte_to_db(0x40), "a gain must be read, not taken from a phantom-only entry");
+        assert!(state.phantom);
+        drop(server);
     }
 
     #[tokio::test]

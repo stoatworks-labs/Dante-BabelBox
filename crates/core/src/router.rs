@@ -20,7 +20,7 @@ pub struct Mapping {
     pub bidirectional: bool,
 }
 
-type SharedAdapter = Arc<Mutex<Box<dyn LocalAdapter>>>;
+pub type SharedAdapter = Arc<Mutex<Box<dyn LocalAdapter>>>;
 
 /// Fans `OcaEvent`s out to every mapped peer address. Tracks the value it
 /// last saw at every address - updated from both incoming events and its
@@ -42,6 +42,10 @@ pub struct Router {
     listener_handles: RwLock<HashMap<String, tokio::task::AbortHandle>>,
     mappings: RwLock<Vec<Mapping>>,
     last_known: Mutex<HashMap<OcaAddress, OcaValue>>,
+    /// Every event from every registered device, re-published for anything
+    /// else that needs to watch the wire - the gain lock follows its leader's
+    /// gain from here rather than opening a second subscription per device.
+    tap: broadcast::Sender<OcaEvent>,
 }
 
 impl Router {
@@ -51,7 +55,20 @@ impl Router {
             listener_handles: RwLock::new(HashMap::new()),
             mappings: RwLock::new(mappings),
             last_known: Mutex::new(HashMap::new()),
+            tap: broadcast::channel(256).0,
         })
+    }
+
+    /// A registered device's adapter, for a caller that needs to act on a
+    /// device directly rather than through a mapping.
+    pub fn device(&self, id: &str) -> Option<SharedAdapter> {
+        self.devices.read().unwrap().get(id).cloned()
+    }
+
+    /// Every event from every registered device, as it arrives - before the
+    /// Router's own echo suppression, which only decides what to *forward*.
+    pub fn tap(&self) -> broadcast::Receiver<OcaEvent> {
+        self.tap.subscribe()
     }
 
     /// Registers a device and starts listening to its event stream
@@ -131,7 +148,10 @@ impl Router {
     async fn listen(&self, source_id: String, mut rx: broadcast::Receiver<OcaEvent>) {
         loop {
             match rx.recv().await {
-                Ok(event) => self.handle_event(event).await,
+                Ok(event) => {
+                    let _ = self.tap.send(event.clone());
+                    self.handle_event(event).await
+                }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     warn!(device = %source_id, dropped = n, "event receiver lagged");
                 }

@@ -116,6 +116,31 @@ When adding an adapter, follow the existing convention: **cite the protocol sour
 module doc comment.** That's what makes the Lectrosonics exception visible rather than
 invisible.
 
+## 4a. The gain lock's invariants
+
+`crates/core/src/gain_lock.rs` compensates follower desks' trims for a leader's preamp changes.
+See [`docs/GAIN-LOCK.md`](docs/GAIN-LOCK.md). Four rules hold it together; break one and it
+misbehaves mid-show rather than in a test:
+
+- **Deltas, never targets.** A follower is only ever moved *by* an amount, from what it holds at
+  that moment (`nudge_object`). Never compute an absolute trim from lock-time state: that would
+  overwrite a trim the follower's engineer changed.
+- **Read live before a relative write.** An adapter with no protocol increment reads the desk's
+  trim immediately before writing it, never from cache. A missed push, or another app taking
+  Wing's single subscription, leaves a cache stale without warning.
+- **Owed is never dropped.** What a follower couldn't take (range, step, error) is kept and
+  offered again, so `applied + owed == -(leader drift)` always holds.
+- **A dead desk is held, not waited on.** After a failed move its desk goes in `Inner::down`.
+  Its followers accrue without I/O until the retry tick's probe (a read, made outside the lock)
+  answers. Follower moves run in parallel across desks. Waiting out one timeout per follower,
+  under the engine's lock, would freeze every healthy desk behind one dead one.
+- **Only reported leader values drive it, and its own echoes don't.** The engine swallows one
+  report of a value it read or set, but only as the next report for that signal (see
+  `Live::expected`).
+
+Trim objects are role `"In N Trim"` at `channel_scheme::trim_ono(N)`. That's an input-channel
+space, separate from the preamp `channel` the other objects use.
+
 ## 5. Commands
 
 ```bash

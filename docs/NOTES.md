@@ -169,3 +169,42 @@ its int64 phantom-read bug (`48VOn` is OSC `h`, was silently dropped). SCP frami
 `get/set <addr> <x> 0 [v]`, 0-based index, gain 0-64 dB direct, `48VOn` 0/1;
 heartbeat `devstatus runmode` every 20 s holds the session. Tests take vectors from
 the real captured frames. See `docs/yamaha-dm3-bench-2026-09-15.md` §7b.
+
+**2026-10-10 — Gain lock (gain compensation across desks), and four things found on the way.**
+`crates/core/src/gain_lock.rs` is the engine: one leader desk owns the shared preamps; while
+locked, each leader gain change `d` becomes a relative move of `-d` on every follower's input
+trim. Followers so far: X32 (`/ch/NN/preamp/trim`) and Wing (`/ch/N/in/set/trim`). Guide:
+`docs/GAIN-LOCK.md`. Tested against mocks and a live run against two mock X32 consoles over UDP;
+**no real desk has followed a leader yet**.
+
+- **No protocol here has a relative trim command.** Surveyed X32, Wing, Yamaha RCP/SCP and OSC,
+  dLive/Avantis, SQ/Qu, AHM, DiGiCo. A&H's NRPN increment/decrement only covers levels and pans.
+  Yamaha's `setr` is documented for MTX/MRX faders only. Wing's native protocol (TCP 2222) has a
+  step token `0xd9`, but its step size and limit behaviour aren't documented. So every follower
+  move is read-live-then-write; the effect (a trim changed at the follower survives) is the same.
+  The DM3's own SCP dictionary (`dante-captures/yamaha-dm3/dm3-scp-dictionary.txt`) has **no**
+  per-channel digital gain, so a DM3 can lead but not follow.
+- **The X32 adapter was wrong on the wire.** It used `/headamp/01..24` and sent the gain as raw
+  dB. The protocol takes `/headamp/000..127` and binary floats in 0..1, so a 30 dB request would
+  have been clamped to 1.0 = +60 dB. Fixed against Maillot's v4.06 document, which the code now
+  cites. The channel range is 1..=128.
+- **Cached gains could be made up.** X32, Wing, dLive, AHM and DM3-OSC create a channel's cache
+  entry on its first message. If that was a phantom report, `get_state` answered `gain_db: 0.0`
+  without ever reading it, and the gain lock locks on such a read. `PreampState::UNREAD` (gain
+  NaN) now marks the entry, and `get_state` asks the desk until gain is known. Test
+  `get_state_after_a_phantom_only_report_asks_for_the_gain` failed on the old code.
+- **An OSC adapter went deaf after a desk reboot.** A connected UDP socket reports ICMP
+  port-unreachable as an error on the next read, and the X32/Wing receive loops *returned* on any
+  read error (the heartbeat did too). So once the desk came back, nothing was ever heard from it
+  again. They now back off and retry. Plugin log lines don't reach the host's log (each dylib has
+  its own tracing dispatcher), which is why this was silent. Found by killing a mock mid-lock.
+- **A read's echo can undo a set.** On X32/Wing/dLive a reply to a get is indistinguishable from
+  a pushed change and arrives ~50–100 ms later. Lock (which reads 30) then set 33 straight away,
+  and the late "30" looked like the leader moving back. The engine now expects the reports it
+  caused and swallows one, but only if it is the next report for that signal: a desk that never
+  echoes would otherwise leave a stale expectation that hides a real move.
+- **abi_stable refuses an older plugin.** A trait method added after `last_prefix_field` with a
+  default body is *source* compatible only. A v0.4.1 plugin binary loaded into the new host is
+  refused ("too many fields", expected 11, found 10). Checked by building one from origin/main.
+  The first daemon test run after a rebuild can also time out at 2 s while macOS scans the fresh
+  dylibs; a rerun passes.

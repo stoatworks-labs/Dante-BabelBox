@@ -11,7 +11,7 @@ Cross-vendor Dante preamp + mic bridge (Rust). Normalizes preamp control and wir
 - Preamp web UI: `cargo run -p preamp-web`
 
 ## Layout (crates/)
-- `core` / `mic-core` — shared traits & models
+- `core` / `mic-core` — shared traits & models; `core::gain_lock` is gain compensation across desks (docs/GAIN-LOCK.md, invariants in AGENTS.md §4a)
 - `discovery` — Dante device discovery
 - `oca` — internal object model; `oca-plugin-abi` — FFI host/plugin contract
 - `ocp1` — a *real* AES70-3 (OCP.1) controller. Not the same thing as `oca`

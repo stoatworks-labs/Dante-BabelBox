@@ -114,7 +114,7 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 
 | Vendor | Device | Protocol | Status |
 |---|---|---|---|
-| Behringer / Midas | X32, Wing, M32, HD96 | OSC | X32 family done; Wing done (8 built-in preamps only) |
+| Behringer / Midas | X32, Wing, M32, HD96 | OSC | X32 family done; Wing done (8 built-in preamps only). Both can also be gain-lock **followers** (input trim). **X32 corrected after 0.4.1:** it addressed `/headamp/01…24` and sent gain as raw dB, where the protocol takes `/headamp/000…127` and a 0–1 float — a 30 dB request would have landed at +60 dB. Never run on a console either way |
 | Allen & Heath | AHM-series processors | NRPN-over-TCP | Done |
 | Allen & Heath | dLive | NRPN-over-TCP (Socket addressing) | Done |
 | Allen & Heath | DT168, DT164-W (Dante expanders) | `AllenHth` vendor messages over Audinate ConMon | **Codec only, no transport.** Built/parsed from static reverse-engineering of A&H's *DT Preamp Control* app + SQ Dante-card firmware — gain, pad, +48 V for 16 preamps. No capture, no hardware: a well-evidenced hypothesis, not proven bytes. Transport (ConMon) needs Audinate DAPI, as with Aphex. See [docs/allenheath-dt-preamp-over-dante.md](docs/allenheath-dt-preamp-over-dante.md) |
@@ -171,6 +171,39 @@ matters beyond convenience: a receiver mounted on a console *unicasts* its
 telemetry to that console, so an ordinary switch port sees none of it and there
 may be no cable to bridge into. Mirroring is the only way to capture that at
 all — it is how the [Shure ACN work](docs/SHURE-ACN.md) was done.
+
+## Gain compensation (gain lock)
+
+Several desks share one set of stage-box preamps. Declare one the **leader**,
+set the gains, and **lock**: from then on, every change to a leader preamp,
+from its own surface or from the bridge, moves each **follower** desk's
+digital trim on that input the opposite way. The monitor and broadcast levels
+don't move. It's the cross-vendor version of Yamaha's Gain Compensation and
+A&H/DiGiCo Gain Tracking.
+
+The moves are relative. The bridge reads the follower's live trim and moves
+it from there, so a trim change made at the follower mid-show survives. A trim
+that hits its limit keeps what it couldn't take and gets it back when the
+leader comes down, and a desk that drops off the network gets the missed
+amount when it returns. Any device with a preamp can lead. Followers today are
+**X32/M32** and **Wing**, the only protocols here that document a writable
+channel trim. A survey of the rest, and why none of them has a relative trim
+command, is in the guide.
+
+```toml
+[gain_lock]
+leader = "foh"
+
+[[gain_lock.signal]]
+name = "Kick In"
+members = [ { device = "foh", preamp = 1 }, { device = "mon", input = 1 } ]
+```
+
+The patch-bay UI has a **Gain lock** tab: elect the leader, lock and unlock,
+set preamp gains, and watch each follower's compensation. **Tested against
+mock desks only; no real desk has followed a leader yet.** See
+[docs/GAIN-LOCK.md](docs/GAIN-LOCK.md) for the rules, the config, which desks
+can do what, and a checklist for a first real rig.
 
 ## Preamp Control — Architecture
 

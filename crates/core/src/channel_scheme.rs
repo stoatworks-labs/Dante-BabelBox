@@ -86,6 +86,40 @@ pub fn descriptor(channel: u16, field: Field) -> OcaObjectDescriptor {
     }
 }
 
+/// Trim objects sit in their own `Ono` range, clear of the three-per-channel
+/// preamp objects above: a trim belongs to a desk's *input channel*, which is
+/// numbered independently of its preamps (X32 input channel 1 may be fed by
+/// headamp 33), so the two can't share one channel index.
+pub const TRIM_ONO_BASE: u32 = 0x0001_0000;
+
+pub fn trim_ono(input: u16) -> Ono {
+    Ono(TRIM_ONO_BASE + input as u32)
+}
+
+/// Decodes a trim `Ono` back to its input channel, `None` if it isn't one or
+/// is out of range for a device with this many trimmable inputs.
+pub fn decode_trim_ono(ono: Ono, inputs: u16) -> Option<u16> {
+    let input = ono.0.checked_sub(TRIM_ONO_BASE)?;
+    if input == 0 || input > inputs as u32 {
+        return None;
+    }
+    Some(input as u16)
+}
+
+/// `"In 7 Trim"` - the role string the gain lock resolves a follower's trim
+/// by, the same way `channel_mapping` resolves `"Ch 3 Gain"`.
+pub fn trim_role(input: u16) -> String {
+    format!("In {input} Trim")
+}
+
+pub fn trim_descriptor(input: u16) -> OcaObjectDescriptor {
+    OcaObjectDescriptor { ono: trim_ono(input), class: OcaClass::Gain, role: trim_role(input), settable: true }
+}
+
+pub fn trim_descriptors(inputs: u16) -> Vec<OcaObjectDescriptor> {
+    (1..=inputs).map(trim_descriptor).collect()
+}
+
 /// The full descriptor set for a device with this many channels - three
 /// objects (gain, phantom, pad) per channel.
 pub fn descriptors_for_channels(channels: u16) -> Vec<OcaObjectDescriptor> {
@@ -115,6 +149,18 @@ mod tests {
     fn decode_ono_rejects_channels_outside_the_device_range() {
         assert_eq!(decode_ono(gain_ono(9), 8), None);
         assert_eq!(decode_ono(Ono(0), 8), None);
+    }
+
+    #[test]
+    fn trim_onos_round_trip_and_never_collide_with_preamp_objects() {
+        for input in 1..=40u16 {
+            assert_eq!(decode_trim_ono(trim_ono(input), 40), Some(input));
+            assert_eq!(decode_ono(trim_ono(input), 128), None, "a trim ono must not decode as a preamp object");
+        }
+        assert_eq!(decode_trim_ono(trim_ono(41), 40), None);
+        assert_eq!(decode_trim_ono(gain_ono(1), 40), None);
+        assert_eq!(decode_trim_ono(Ono(TRIM_ONO_BASE), 40), None);
+        assert_eq!(trim_descriptor(7).role, "In 7 Trim");
     }
 
     #[test]

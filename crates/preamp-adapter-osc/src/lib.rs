@@ -6,8 +6,8 @@
 //! comment for scope limits (currently only the console's 8 built-in LCL
 //! preamps, not AES50/StageConnect-attached stageboxes).
 
-mod wing;
-mod x32;
+pub mod wing;
+pub mod x32;
 
 pub use wing::WingAdapter;
 pub use x32::X32Adapter;

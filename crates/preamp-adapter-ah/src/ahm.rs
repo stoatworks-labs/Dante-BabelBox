@@ -196,7 +196,7 @@ impl DeviceAdapter for AhmAdapter {
     }
 
     async fn get_state(&mut self, channel: u16) -> AdapterResult<PreampState> {
-        if let Some(state) = self.state.lock().await.get(&channel) {
+        if let Some(state) = self.state.lock().await.get(&channel).filter(|s| s.gain_known()) {
             return Ok(*state);
         }
         self.get_param(channel, PARAM_GAIN).await?;
@@ -204,7 +204,7 @@ impl DeviceAdapter for AhmAdapter {
 
         for _ in 0..20 {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            if let Some(state) = self.state.lock().await.get(&channel) {
+            if let Some(state) = self.state.lock().await.get(&channel).filter(|s| s.gain_known()) {
                 return Ok(*state);
             }
         }
@@ -368,11 +368,7 @@ fn spawn_receive_loop(
 
                 let (new_state, changed) = {
                     let mut guard = state.lock().await;
-                    let entry = guard.entry(channel).or_insert(PreampState {
-                        gain_db: 0.0,
-                        phantom: false,
-                        pad: None,
-                    });
+                    let entry = guard.entry(channel).or_insert(PreampState::UNREAD);
                     // One parameter per message; see ChangedFields.
                     let changed = match param {
                         PARAM_GAIN => {

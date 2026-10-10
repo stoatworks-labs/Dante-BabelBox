@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use dante_babelbox_oca::{Ono, OcaEvent, OcaObjectDescriptor, OcaValue};
 use tokio::sync::broadcast;
 
-use crate::adapter::{AdapterResult, DeviceInfo};
+use crate::adapter::{AdapterError, AdapterResult, DeviceInfo};
 
 #[async_trait]
 pub trait LocalAdapter: Send + Sync {
@@ -31,4 +31,13 @@ pub trait LocalAdapter: Send + Sync {
     async fn get_object(&mut self, ono: Ono) -> AdapterResult<OcaValue>;
     async fn set_object(&mut self, ono: Ono, value: OcaValue) -> AdapterResult<()>;
     fn subscribe(&self) -> broadcast::Receiver<OcaEvent>;
+
+    /// Moves a numeric object by `delta` from the device's live value and
+    /// returns the change actually made - see `DeviceAdapter::nudge_trim` for
+    /// why this is relative. The default refuses: only an adapter that knows
+    /// the object's range and step can say what a relative move applied.
+    async fn nudge_object(&mut self, ono: Ono, delta: f32) -> AdapterResult<f32> {
+        let _ = delta;
+        Err(AdapterError::Unsupported(format!("device '{}' has no relative control for object {ono}", self.id())))
+    }
 }

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
-use dante_babelbox_core::{channel_mapping, channel_scheme, PluginRegistry, Router};
+use dante_babelbox_core::{channel_mapping, channel_scheme, GainLock, PluginRegistry, Router};
 use dante_babelbox_oca::OcaObjectDescriptor;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
@@ -94,6 +94,27 @@ pub async fn run(
 
     apply_channel_mappings(&router, &cfg.mappings, &descriptors);
 
+    let gain_lock = match cfg.gain_lock.clone() {
+        Some(config) => {
+            let lock_on_start = config.lock_on_start;
+            let engine = GainLock::new(Arc::clone(&router), config).await;
+            engine.spawn();
+            let status = if lock_on_start { engine.lock().await } else { engine.status().await };
+            info!(leader = %status.leader, locked = status.locked, signals = status.signals.len(), "gain lock ready");
+            for signal in &status.signals {
+                if let Some(problem) = &signal.problem {
+                    warn!(signal = %signal.name, %problem, "gain lock signal not compensating");
+                }
+                for follower in signal.followers.iter().filter(|f| f.error.is_some()) {
+                    warn!(signal = %signal.name, device = %follower.device, input = follower.input,
+                        error = follower.error.as_deref().unwrap_or_default(), "gain lock follower unavailable");
+                }
+            }
+            Some(engine)
+        }
+        None => None,
+    };
+
     if let Some(path) = config_path {
         let router = Arc::clone(&router);
         tokio::spawn(watch_and_apply_mappings(path, router, descriptors.clone()));
@@ -106,6 +127,7 @@ pub async fn run(
             registry: Arc::clone(&registry),
             descriptors: Arc::new(std::sync::RwLock::new(descriptors.clone())),
             channel_mappings: Arc::new(std::sync::RwLock::new(cfg.mappings.clone())),
+            gain_lock: gain_lock.clone(),
         };
         tokio::spawn(async move {
             if let Err(e) = dante_babelbox_preamp_web::serve(bind, state).await {
@@ -241,6 +263,7 @@ mod tests {
                 to: PreampAddress::new("dm3", 5),
                 bidirectional: true,
             }],
+            gain_lock: None,
         };
 
         let bridge = tokio::spawn(run(cfg, None, None, plugins_dir_for_tests()));
@@ -277,6 +300,101 @@ mod tests {
             }
         }
         assert!(found, "did not see a 48VOn relay to DM3 channel 5");
+
+        bridge.abort();
+    }
+
+    /// End-to-end gain lock through real dylib-loaded plugins: a dLive
+    /// leads, an X32 follows, and the bridge locks at start. When the dLive
+    /// reports its preamp up seven steps (55/127 dB each, so +3.03 dB), the
+    /// X32's input trim must be read and written 3 dB lower - the nearest
+    /// 0.25 dB step to -3.03.
+    #[tokio::test]
+    async fn gain_lock_trims_an_x32_follower_when_a_dlive_leader_moves() {
+        use dante_babelbox_core::gain_lock::{Member, Signal};
+        use dante_babelbox_core::GainLockConfig;
+        use tokio::io::AsyncReadExt;
+
+        let dlive_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dlive_addr = dlive_listener.local_addr().unwrap();
+        let x32_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let x32_addr = x32_socket.local_addr().unwrap();
+
+        let cfg = Config {
+            devices: vec![
+                DeviceConfig {
+                    id: "foh".into(),
+                    kind: "dlive-tcp".into(),
+                    address: Some(dlive_addr.ip()),
+                    port: Some(dlive_addr.port()),
+                    is_virtual: false,
+                    channels: None,
+                },
+                DeviceConfig {
+                    id: "mon".into(),
+                    kind: "osc-x32".into(),
+                    address: Some(x32_addr.ip()),
+                    port: Some(x32_addr.port()),
+                    is_virtual: false,
+                    channels: None,
+                },
+            ],
+            mappings: Vec::new(),
+            gain_lock: Some(GainLockConfig {
+                leader: "foh".into(),
+                signals: vec![Signal {
+                    name: "Kick".into(),
+                    members: vec![
+                        Member { device: "foh".into(), preamp: Some(12), input: None },
+                        Member { device: "mon".into(), preamp: None, input: Some(7) },
+                    ],
+                }],
+                poll_ms: None,
+                lock_on_start: true,
+            }),
+        };
+
+        let bridge = tokio::spawn(run(cfg, None, None, plugins_dir_for_tests()));
+
+        // The dLive: answer the lock's gain read for socket 12 (MP 0x0B)
+        // with 0x40, give the lock a moment to take it as the reference,
+        // then report the preamp seven steps up.
+        let (mut dlive, _) = tokio::time::timeout(Duration::from_secs(5), dlive_listener.accept()).await.unwrap().unwrap();
+        let get_gain = [0x00u8, 0x05, 0x0B, 0x19, 0x0B, 0xF7];
+        let mut seen = Vec::new();
+        let mut buf = [0u8; 256];
+        while !seen.windows(get_gain.len()).any(|w| w == get_gain) {
+            let n = tokio::time::timeout(Duration::from_secs(5), dlive.read(&mut buf)).await.unwrap().unwrap();
+            seen.extend_from_slice(&buf[..n]);
+        }
+        dlive.write_all(&[0xE0, 0x0B, 0x40]).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        dlive.write_all(&[0xE0, 0x0B, 0x47]).await.unwrap();
+
+        // The X32: the trim is read first, answered at 0 dB, then written.
+        async fn next(socket: &UdpSocket) -> (rosc::OscMessage, std::net::SocketAddr) {
+            let mut udp = [0u8; 512];
+            loop {
+                let (len, from) =
+                    tokio::time::timeout(Duration::from_secs(5), socket.recv_from(&mut udp)).await.unwrap().unwrap();
+                let (_, rosc::OscPacket::Message(m)) = rosc::decoder::decode_udp(&udp[..len]).unwrap() else { continue };
+                if m.addr != "/xremote" {
+                    return (m, from);
+                }
+            }
+        }
+        let (read, from) = next(&x32_socket).await;
+        assert_eq!(read.addr, "/ch/07/preamp/trim");
+        assert!(read.args.is_empty(), "the live trim is read before it is moved");
+        let reply = rosc::OscPacket::Message(rosc::OscMessage {
+            addr: "/ch/07/preamp/trim".into(),
+            args: vec![rosc::OscType::Float(0.5)], // 0 dB on linf [-18, 18]
+        });
+        x32_socket.send_to(&rosc::encoder::encode(&reply).unwrap(), from).await.unwrap();
+
+        let (write, _) = next(&x32_socket).await;
+        assert_eq!(write.addr, "/ch/07/preamp/trim");
+        assert_eq!(write.args, vec![rosc::OscType::Float((-3.0 + 18.0) / 36.0)]);
 
         bridge.abort();
     }

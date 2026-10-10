@@ -30,8 +30,9 @@ The patch-bay UI (a single embedded HTML page).
 
 ```json
 {
-  "devices":  [ /* DeviceView */ ],
-  "mappings": [ /* ChannelMapping */ ]
+  "devices":   [ /* DeviceView */ ],
+  "mappings":  [ /* ChannelMapping */ ],
+  "gain_lock": { /* GainLockStatus - present only when bridge.toml has a [gain_lock] table */ }
 }
 ```
 
@@ -97,6 +98,41 @@ Both endpoints are `PreampAddress` (a device id plus a channel). `bidirectional`
 WebSocket. Pushes the same object as `GET /api/state` on connect and whenever it changes, so
 the patch bay updates live without polling.
 
+## Gain lock
+
+Present when `bridge.toml` has a `[gain_lock]` table (see [GAIN-LOCK.md](GAIN-LOCK.md));
+otherwise every route below answers `404`. Each returns the `GainLockStatus` after the change:
+
+```json
+{
+  "leader": "foh",
+  "locked": true,
+  "candidates": ["foh", "mon"],
+  "signals": [{
+    "name": "Kick In",
+    "leader_preamp": 1,
+    "controllable": true,
+    "gain_db": 33.0,
+    "reference_db": 30.0,
+    "problem": null,
+    "followers": [{ "device": "mon", "input": 1, "applied_db": -3.0, "owed_db": 0.0, "error": null }]
+  }]
+}
+```
+
+`candidates` are the devices that could be elected (they have a preamp in some signal).
+`applied_db` is the follower's net trim change from this lock. `owed_db` is compensation not yet
+made: under half a trim step, beyond the trim's range, or waiting on a failed desk. `problem`
+says why a signal isn't being compensated.
+
+| Route | Body | Notes |
+|---|---|---|
+| `GET /api/gain-lock` | — | The status |
+| `POST /api/gain-lock/lock` | — | Captures each leader gain as the reference and starts compensating; again to re-capture |
+| `POST /api/gain-lock/unlock` | — | Stops compensating; trims stay where they are |
+| `POST /api/gain-lock/leader` | `{"device": "mon"}` | `409` while locked |
+| `POST /api/gain-lock/preamp` | `{"signal": "Kick In", "gain_db": 32}` or `{"signal": "Kick In", "delta_db": -1}` | Sets the leader's preamp; while locked the followers move at once. `400` unless exactly one of the two is given |
+
 ---
 
 ## Channel addressing differs per vendor — read this
@@ -109,7 +145,7 @@ addresses the wrong preamp:
 | `ah-tcp` | Allen & Heath AHM-series processors |
 | `dlive-tcp` | **Physical preamp *socket* number, 1–128** — not a console strip |
 | `yamaha-dm3` | **Local Input Num, 1–16** |
-| `osc-x32` | X32/M32/HD96 OSC dialect |
+| `osc-x32` | **Headamp index + 1, 1–128**: 1–32 local, 33–80 AES50-A, 81–128 AES50-B (`/headamp/000…127`) |
 | `osc-wing` | Wing's own dialect — **the console's 8 built-in LCL preamps only** |
 
 `yamaha-dm3` gain is **coarse integer dB, 0–64 only**. A fractional gain request cannot be
