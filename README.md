@@ -114,7 +114,7 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 
 | Vendor | Device | Protocol | Status |
 |---|---|---|---|
-| Behringer / Midas | X32, Wing, M32, HD96 | OSC | X32 family done; Wing done (8 built-in preamps only). Both can also be gain-lock **followers** (input trim). **X32 corrected after 0.4.1:** it addressed `/headamp/01…24` and sent gain as raw dB, where the protocol takes `/headamp/000…127` and a 0–1 float — a 30 dB request would have landed at +60 dB. Never run on a console either way |
+| Behringer / Midas | X32, Wing, M32, HD96 | OSC | X32 family done; Wing done (8 built-in preamps only). Both can also be gain-lock **followers** (input trim). **X32 corrected in 0.5.0:** it addressed `/headamp/01…24` and sent gain as raw dB, where the protocol takes `/headamp/000…127` and a 0–1 float — a 30 dB request would have landed at +60 dB. Never run on a console either way |
 | Allen & Heath | AHM-series processors | NRPN-over-TCP | Done |
 | Allen & Heath | dLive | NRPN-over-TCP (Socket addressing) | Done |
 | Allen & Heath | DT168, DT164-W (Dante expanders) | `AllenHth` vendor messages over Audinate ConMon | **Codec only, no transport.** Built/parsed from static reverse-engineering of A&H's *DT Preamp Control* app + SQ Dante-card firmware — gain, pad, +48 V for 16 preamps. No capture, no hardware: a well-evidenced hypothesis, not proven bytes. Transport (ConMon) needs Audinate DAPI, as with Aphex. See [docs/allenheath-dt-preamp-over-dante.md](docs/allenheath-dt-preamp-over-dante.md) |
