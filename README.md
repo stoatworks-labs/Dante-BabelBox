@@ -1,58 +1,51 @@
 # Dante-BabelBox
 
 > **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
-> (Anthropic), directed and reviewed by a human author. Adapters are built
-> against official/community-authoritative vendor protocol specs (see each
-> adapter's module doc comment for its source) — with one clearly-flagged
-> exception, the Lectrosonics mic adapter, whose wire format is an unverified
-> placeholder (see the Radio Mic Telemetry status table). Almost every adapter
-> here has been tested only against mock devices, **not validated against real
-> hardware** — with the two exceptions below. Review before use on live gear.
+> (Anthropic), directed and reviewed by a human author. The adapters are built against official
+> or community-authoritative vendor protocol specs (each adapter's module doc comment names its
+> source), with one clearly flagged exception: the Lectrosonics mic adapter, whose wire format is
+> an unverified placeholder (see the Radio Mic Telemetry status table). Almost every adapter here
+> has only been tested against mock devices and is **not validated against real hardware**, so
+> check it over before you use it on live gear. There are two exceptions.
 >
-> **Exception one: the Yamaha DM3 is a fully hardware-validated target.**
-> On 2026-09-15, against a real DM3 (firmware V3.00), the **SCP adapter**
-> (`Dm3ScpAdapter`, kind `yamaha-dm3-scp`, TCP 49280) had every path proven on
-> the console — `identify`, `get_state`, `set_gain`, `set_phantom`, and a live
-> `subscribe()` change feed driven by the DM3's own `NOTIFY` push — through the
-> full plugin stack (`preamp-bridge` loaded the cdylib and connected to the desk).
-> This is the first adapter in the workspace with every method validated on real
-> hardware, not just against mocks. The earlier OSC adapter (`Dm3Adapter`, kind
-> `yamaha-dm3`) also ran on the console but is weaker — OSC `set` is
-> unacknowledged and the DM3 pushes no unsolicited OSC, so read-after-write and
-> `subscribe()` don't work as well; SCP is why it was built. Full findings:
+> **First, the Yamaha DM3 is fully validated on hardware.** On 2026-09-15, the **SCP adapter**
+> (`Dm3ScpAdapter`, kind `yamaha-dm3-scp`, TCP 49280) had every path proven on a real DM3
+> (firmware V3.00) through the full plugin stack: `preamp-bridge` loaded the `cdylib`, connected
+> to the desk, identified it, read and wrote gain and phantom, and turned the desk's own `NOTIFY`
+> push into a live `subscribe()` change feed. It's the first adapter here with every method
+> proven on hardware rather than just against mocks. The older OSC adapter (`Dm3Adapter`, kind
+> `yamaha-dm3`) ran on the desk too but is weaker, for reasons the status table gives, and that's
+> why SCP got built. Full findings:
 > [`docs/yamaha-dm3-bench-2026-09-15.md`](docs/yamaha-dm3-bench-2026-09-15.md).
 >
-> **Exception two, and it's a big one.** The Yamaha R-series HA protocol has
-> been captured from a real QL1 + Rio3224-D2, decoded, documented, and then
-> **rebuilt from that documentation and transmitted back — the stagebox
-> accepted it and changed its gain.** See
-> [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md).
-> That is a *protocol* proven on hardware, not *code* proven on hardware. The
-> adapter now exists (`MbcAdapter`) and its codec reproduces, byte for byte,
-> the frame the Rio accepted — but the adapter itself has still never been run
-> against a real device. The wire format is verified; the code around it is
-> tested against captured frames, like everything else here.
+> **Second, and it's a big one.** The Yamaha R-series HA protocol was captured from a real QL1 +
+> Rio3224-D2, decoded, written up, then **rebuilt from the write-up and sent back, and the
+> stagebox accepted it and changed its gain** (see
+> [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md)). What that proves
+> on hardware is the protocol. The adapter now exists (`MbcAdapter`) and its codec reproduces the
+> frame the Rio accepted byte for byte, but the adapter itself has still never been run against a
+> real device. The wire format is verified; the code around it is tested against captured frames,
+> like everything else here.
 
-Cross-vendor Dante control bridge, currently covering two domains:
+A control bridge for Dante rigs with kit from more than one manufacturer. It does two jobs:
 
-1. **Preamp control** — bridges gain/phantom-power control across
-   Dante-networked mixing consoles and stageboxes from different vendors.
-2. **Radio-mic telemetry** — monitors battery, RF signal, and audio level
-   from wireless mic receivers, across vendors, whether or not the
-   hardware even has a Dante audio option installed (see the "Radio Mic
-   Telemetry" sections below for why that doesn't matter here).
+1. **Preamp control.** Gain and phantom power, bridged across Dante-networked mixing consoles
+   and stageboxes from different vendors.
+2. **Radio-mic telemetry.** Battery, RF signal and audio level from wireless mic receivers,
+   across vendors, whether or not the receiver even has a Dante audio option fitted (the "Radio
+   Mic Telemetry" sections below explain why that doesn't matter here).
 
-[![Dante-BabelBox — two vendor protocols recovered from packet captures](docs/video-thumb.png)](https://www.youtube.com/watch?v=Tx7hntcaOTw)
+[![Dante-BabelBox: two vendor protocols recovered from packet captures](docs/video-thumb.png)](https://www.youtube.com/watch?v=Tx7hntcaOTw)
 
-*56 seconds. Every line of terminal output is the real decoder — the two
-capture-replay tools in this repo, run against real recordings of a Yamaha QL1
-talking to a Rio3224-D2 and a Shure QLXD4 mounted on a console.*
+*56 seconds. Every line of terminal output is the actual decoder: the two capture-replay tools in
+this repo, run against recordings of a real Yamaha QL1 talking to a Rio3224-D2 and a Shure QLXD4
+mounted on a console.*
 
-Dante carries audio and basic mDNS-based device discovery, but nothing
-about preamp gain, phantom power, or wireless-mic status — each vendor
-layers its own proprietary control protocol on top of the same network.
-This project translates those protocols so state on one vendor's device
-is usable from outside its own ecosystem.
+Dante carries your audio and a basic mDNS-based device discovery, and there it stops. Preamp
+gain, phantom power and wireless-mic status are left to each manufacturer, and each one runs its
+own proprietary control protocol over the same network. So one cable ends up carrying several
+languages that don't understand each other, hence the name. This project translates between
+them, so the state of one vendor's device can be used from outside that vendor's own kit.
 
 ```mermaid
 flowchart LR
@@ -128,67 +121,60 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 | Aphex | 1788A | Parametric MIDI SysEx | **Codec only, no transport.** The byte string is built and parsed from Aphex's published command table (gain, phantom, pad, polarity, mute, low cut, limiter — more of this project's model than any other device here). Nothing sends it yet: the table is the MIDI layer, and how SysEx reaches the unit's Ethernet port isn't documented. See the crate's module comment |
 | Sennheiser | evolution wireless G3 (EM 300/500 G3) | **binary WSM protocol** (UDP 8133) | **Validated end-to-end on a real EM 500 G3** (2026-09-15): a DM3's remote head-amp gain drove the receiver's analog **AF-out level** through the bridge, confirmed on the hardware. Kind `sennheiser-ewg3`, one channel, gain = AF-out (−24…+18 dB, 3 dB steps). Reverse-engineered from Wireless Systems Manager — **not** the documented ASCII protocol (TI 1254, UDP 53212), which this receiver does not answer. Close WSM before bridging: it holds the receiver's single write-master slot. See [docs/sennheiser-ewg3-bench-2026-09-15.md](docs/sennheiser-ewg3-bench-2026-09-15.md) |
 
-Every "Done" adapter is built from an official vendor spec (or, for the
-X32 family, the long-established community reference), not guesswork, and
-is unit- and integration-tested against mock devices standing in for the
-real protocol. See each adapter's module doc comment
-(`crates/preamp-adapter-*/src/*.rs`) for the exact spec it's built from and any
-open gaps.
+Every "Done" adapter is built from an official vendor spec (or, for the X32 family, the
+long-established community reference) rather than guesswork, and has unit and integration tests
+against mock devices standing in for the real protocol. Each adapter's module doc comment
+(`crates/preamp-adapter-*/src/*.rs`) says which spec it's built from and what's still open.
 
-**Not yet built:** device emulation (making the bridge answer as if it
-*is* a native device of a foreign brand, so a console's own on-screen
-preamp UI can control it directly). Today the bridge is a translating
-router you configure by IP/channel — genuinely useful, but not yet
-"invisible" to the consoles. This needs real hardware to build safely,
-since it means impersonating a device's discovery/pairing handshake
-closely enough that real gear accepts it. The patch-bay web UI (below)
-already lets you declare **virtual** devices — placeholders for this
-emulation layer — and map them against real devices now, so the intended
-topology can be designed ahead of the emulation itself existing.
+**Not yet built:** device emulation, where the bridge answers as if it *is* a native device of a
+foreign brand, so a console's own on-screen preamp UI can control it directly. For now the
+bridge is a translating router you set up by IP and channel. That's useful, but the consoles
+can still tell it's there. Emulation needs real hardware to build safely, because it means
+impersonating a device's discovery and pairing handshake well enough that real gear accepts it.
+The patch-bay web UI (below) already lets you declare **virtual** devices as placeholders for
+that layer and map them against real devices now, so you can design the topology before the
+emulation exists.
 
-Building that requires packet captures of a real console paired with its
-own native device (e.g. a real Yamaha QL1 talking to a real Rio/Tio, not
-a foreign-vendor box) — none of that handshake is in any public spec.
-[`docs/`](docs/) has a non-technical field guide, one edition per OS, for
-capturing that traffic with Wireshark using nothing but a laptop as an
-inline bridge:
+Building it needs packet captures of a real console paired with its own native device (a real
+Yamaha QL1 talking to a real Rio or Tio, say, rather than another manufacturer's box), because
+none of that handshake is in any public spec. [`docs/`](docs/) has a non-technical field guide to
+capturing that traffic with Wireshark using nothing but a laptop as an inline bridge, one edition
+per OS:
 
 - [Windows](docs/capture-guide-windows.md) ([PDF](docs/capture-guide-windows.pdf), [HTML](docs/capture-guide-windows.html))
 - [macOS](docs/capture-guide-macos.md) ([PDF](docs/capture-guide-macos.pdf), [HTML](docs/capture-guide-macos.html))
 - [Linux](docs/capture-guide-linux.md) ([PDF](docs/capture-guide-linux.pdf), [HTML](docs/capture-guide-linux.html))
 
-[![Send us a capture — the packets two open-source audio tools are waiting on](docs/video-capture-callout-thumb.png)](https://www.youtube.com/watch?v=E-gjYZoHVAw)
+[![Send us a capture: the packets two open-source audio tools are waiting on](docs/video-capture-callout-thumb.png)](https://www.youtube.com/watch?v=E-gjYZoHVAw)
 
 *57 seconds, covering this project and [RFutils](https://github.com/stoatworks-labs/RFutils)
-together. The Wireshark section is the real QL1/Rio recording the Yamaha decoder
-was built from — 4052 packets of Audinate ConMon that Wireshark renders as
-`Data`, because nothing knew what they were.*
+together. The Wireshark section is the same QL1/Rio recording the Yamaha decoder was built from:
+4052 packets of Audinate ConMon that Wireshark shows as `Data`, because nothing knew what they
+were.*
 
-Each guide also carries a step-by-step recipe for the other route — putting a
-port on a **UniFi USW-Flex-Mini** into mirroring mode, which is a ~£25 switch
-rather than the borrowed-from-IT hardware a mirror port used to mean. That
-matters beyond convenience: a receiver mounted on a console *unicasts* its
-telemetry to that console, so an ordinary switch port sees none of it and there
-may be no cable to bridge into. Mirroring is the only way to capture that at
-all — it is how the [Shure ACN work](docs/SHURE-ACN.md) was done.
+Each guide also has a step-by-step recipe for the other route: putting a port on a **UniFi
+USW-Flex-Mini** into mirroring mode. That's a ~£25 switch, where a mirror port used to mean
+borrowing something from IT and promising to bring it back. It matters for more than
+convenience. A receiver mounted on a console *unicasts* its telemetry to that console, so an
+ordinary switch port sees none of it, and there may not be a cable you can bridge into.
+Mirroring is the only way to capture that at all, and it's how the
+[Shure ACN work](docs/SHURE-ACN.md) was done.
 
 ## Gain compensation (gain lock)
 
-Several desks share one set of stage-box preamps. Declare one the **leader**,
-set the gains, and **lock**: from then on, every change to a leader preamp,
-from its own surface or from the bridge, moves each **follower** desk's
-digital trim on that input the opposite way. The monitor and broadcast levels
-don't move. It's the cross-vendor version of Yamaha's Gain Compensation and
-A&H/DiGiCo Gain Tracking.
+When several desks share one set of stage-box preamps, declare one of them the **leader**, set
+the gains and **lock**. From then on, every change to a leader preamp, from its own surface or
+from the bridge, moves each **follower** desk's digital trim on that input the opposite way. The
+monitor and broadcast levels don't move, so FOH can reach for the gain mid-show without monitors
+hearing about it. It's the cross-vendor version of Yamaha's Gain Compensation and A&H/DiGiCo Gain
+Tracking.
 
-The moves are relative. The bridge reads the follower's live trim and moves
-it from there, so a trim change made at the follower mid-show survives. A trim
-that hits its limit keeps what it couldn't take and gets it back when the
-leader comes down, and a desk that drops off the network gets the missed
-amount when it returns. Any device with a preamp can lead. Followers today are
-**X32/M32** and **Wing**, the only protocols here that document a writable
-channel trim. A survey of the rest, and why none of them has a relative trim
-command, is in the guide.
+The moves are relative: the bridge reads the follower's live trim and moves it from there, so a
+trim change made at the follower mid-show survives. A trim that hits its limit holds on to what
+it couldn't take and gets it back when the leader comes down, and a desk that drops off the
+network gets the missed amount when it comes back. Any device with a preamp can lead. Followers
+today are X32/M32 and Wing, the only protocols here that document a writable channel trim. The
+gain-lock guide has a survey of the rest, and why none of them has a relative trim command.
 
 ```toml
 [gain_lock]
@@ -199,11 +185,10 @@ name = "Kick In"
 members = [ { device = "foh", preamp = 1 }, { device = "mon", input = 1 } ]
 ```
 
-The patch-bay UI has a **Gain lock** tab: elect the leader, lock and unlock,
-set preamp gains, and watch each follower's compensation. **Tested against
-mock desks only; no real desk has followed a leader yet.** See
-[docs/GAIN-LOCK.md](docs/GAIN-LOCK.md) for the rules, the config, which desks
-can do what, and a checklist for a first real rig.
+The patch-bay UI has a **Gain lock** tab where you elect the leader, lock and unlock, set preamp
+gains, and watch each follower's compensation. **Tested against mock desks only; no real desk
+has followed a leader yet.** [docs/GAIN-LOCK.md](docs/GAIN-LOCK.md) has the rules, the config,
+which desks can do what, and a checklist for a first real rig.
 
 ## Preamp Control — Architecture
 
@@ -228,42 +213,33 @@ crates/
 └── preamp-cli/                 # `preamp-bridge` binary: discover, init, run, config, hot-reload
 ```
 
-Every device, whatever vendor and whatever wire protocol, is represented
-internally as a flat list of OCA objects (a gain knob, a mute switch, a
-battery-percent reading — each one an object with an `Ono` identity, a
-class, a role label, and a value). The `Router` holds a mapping table
-(`bridge.toml`) and fans OCA events from one device's objects out to
-their mapped peers, with echo suppression so a device's own confirmation
-of a command doesn't bounce back and forth forever between
-bidirectionally-mapped devices. See "Plugin Architecture" below for the
-full picture, and
-[`docs/plugin-development-guide.md`](docs/plugin-development-guide.md)
-for how to add a new device as a loadable plugin.
+Inside, every device, whatever the vendor and whatever the wire protocol, is a flat list of OCA
+objects: a gain knob, a mute switch, a battery-percent reading, each one an object with an `Ono`
+identity, a class, a role label and a value. The `Router` holds a mapping table (`bridge.toml`)
+and fans OCA events out from one device's objects to their mapped peers. It has echo
+suppression, so a device confirming a command doesn't start an endless rally between two
+bidirectionally mapped devices. "Plugin Architecture" below has the full picture, and
+[`docs/plugin-development-guide.md`](docs/plugin-development-guide.md) shows how to add a new
+device as a loadable plugin.
 
-All preamp vendors ship as real dynamically-loaded plugins - X32's
-FFI translation is hand-written (it was this project's original
-proof-of-concept, predating the generic wrapper below); Wing, AHM,
-dLive, DM3, and the Sennheiser G3 are thin crates built on
-`core::LegacyPluginBridge`, which generically wraps the older in-process
-`DeviceAdapter` trait (connect, set_gain, set_phantom, get_state,
-subscribe) so their existing, already-tested wire-protocol code didn't
-need rewriting to become a real plugin - only a
-`create_adapter`/`plugin_info` pair per vendor.
+All the preamp vendors ship as dynamically loaded plugins. X32's FFI translation is
+hand-written (it was this project's original proof of concept, and predates the generic wrapper).
+Wing, AHM, dLive, DM3 and the Sennheiser G3 are thin crates built on `core::LegacyPluginBridge`,
+which wraps the older in-process `DeviceAdapter` trait (connect, set_gain, set_phantom,
+get_state, subscribe) generically, so their existing, already-tested wire-protocol code didn't
+need rewriting to become a plugin. Each vendor only needed a `create_adapter`/`plugin_info` pair.
 
 ## Plugin Architecture
 
-Device support can be loaded two ways, and both end up looking identical
-to the `Router` and the web UI:
+Device support can be loaded two ways, and the `Router` and the web UI can't tell them apart:
 
-- **Statically registered** — compiled into the `preamp-bridge` binary at
-  build time (today: only the two known-but-unimplemented placeholder
-  kinds, `ah-midi`/`yamaha`, which exist purely to explain why they're
-  not supported rather than to back a real device).
-- **Dynamically loaded** — a separate `.so`/`.dylib`/`.dll` file, scanned
-  from a directory (`--plugins-dir`, default `plugins`) at startup and
-  loaded at runtime via [`abi_stable`](https://docs.rs/abi_stable). Adding
-  a new vendor this way needs **no recompile of this project at all** —
-  build your plugin, drop the file in the plugins directory, restart the
+- **Statically registered:** compiled into the `preamp-bridge` binary at build time. Today
+  that's only the two known-but-unimplemented placeholder kinds, `ah-midi` and `yamaha`, which
+  exist to explain why they aren't supported rather than to back a real device.
+- **Dynamically loaded:** a separate `.so`/`.dylib`/`.dll` file, found in a directory
+  (`--plugins-dir`, default `plugins`) at startup and loaded at runtime via
+  [`abi_stable`](https://docs.rs/abi_stable). Adding a new vendor this way needs no recompile of
+  this project at all: build your plugin, drop the file in the plugins directory and restart the
   bridge. Every real preamp vendor works this way today.
 
 ```mermaid
@@ -282,30 +258,23 @@ flowchart LR
     Router["Router (OCA objects)"] --> Web["Patch-bay web UI"]
 ```
 
-Both registration paths converge on the same internal shapes:
-`LocalAdapter` (the in-process trait the `Router` actually talks to) and
-the OCA object model (`Ono`/`OcaClass`/`OcaValue`/`OcaObject`) described
-above. A dynamically-loaded plugin talks to the host through a narrower,
-FFI-safe mirror of that same model (`dante-babelbox-oca-plugin-abi`'s
-`PluginAdapter` trait) — see
-[`docs/plugin-development-guide.md`](docs/plugin-development-guide.md) for
-the full contract, worked examples (`crates/plugin-osc-x32` for a
-hand-written translation, `crates/plugin-osc-wing` for the generic
-`LegacyPluginBridge` path most vendors use, and
-`crates/plugin-aes70` for one that implements `PluginAdapter`
-directly because its object set is only known once the device has been
-asked), and the real
-pitfalls hit building it (async-to-sync bridging, why a plugin's Tokio
-runtime has to be multi-threaded, why loading more than one plugin file
-sharing the same root-module type needs `abi_stable`'s uncached
-per-file API rather than `RootModule::load_from_file`, how automatic
-device+channel mapping resolution actually matches objects by role
-name).
+Both paths end up at the same internal shapes: `LocalAdapter` (the in-process trait the `Router`
+actually talks to) and the OCA object model (`Ono`/`OcaClass`/`OcaValue`/`OcaObject`) described
+above. A dynamically loaded plugin talks to the host through a narrower, FFI-safe mirror of that
+model, the `PluginAdapter` trait in `dante-babelbox-oca-plugin-abi`.
+[`docs/plugin-development-guide.md`](docs/plugin-development-guide.md) has the full contract and
+worked examples: `crates/plugin-osc-x32` for a hand-written translation, `crates/plugin-osc-wing`
+for the generic `LegacyPluginBridge` path most vendors use, and `crates/plugin-aes70` for one that
+implements `PluginAdapter` directly, because its object set isn't known until the device has been
+asked. It also covers the snags that turned up while building it: async-to-sync bridging, why a
+plugin's Tokio runtime has to be multi-threaded, why loading more than one plugin file with the
+same root-module type needs `abi_stable`'s uncached per-file API rather than
+`RootModule::load_from_file`, and how automatic device and channel mapping actually matches
+objects by role name.
 
-That guide is written for anyone adding support for a new device without
-needing this project to accept a PR first — implement your protocol,
-compile it as a `cdylib`, and it loads into any `preamp-bridge` build
-without touching this repo's own crates.
+That guide is for anyone who wants to add support for a device without waiting for me to accept
+a PR: implement your protocol, compile it as a `cdylib`, and it loads into any `preamp-bridge`
+build without touching this repo's own crates.
 
 ## Preamp Control — Building and running
 
@@ -327,12 +296,11 @@ cp bridge.example.toml bridge.toml   # edit for your rig, or use the init comman
 cargo run --bin preamp-bridge -- run --config bridge.toml
 ```
 
-`init`'s device-identification confidence varies by protocol: X32-family
-and Wing both confirm vendor *and* model (from documented `/info`/`/?`
-replies); AHM and dLive confirm protocol family only (their specs have no
-model-string query); DM3 is weakest-signal, since its spec documents no
-identify query at all and this reuses a scene-status request as a
-presence probe. See each adapter's `identify()` for details.
+How sure `init` is about what it found depends on the protocol. X32-family desks and Wing both
+confirm vendor *and* model (from documented `/info`/`/?` replies). AHM and dLive only confirm the
+protocol family, because their specs have no model-string query. DM3 is the weakest: its spec
+documents no identify query at all, so `init` reuses a scene-status request as a presence probe.
+Each adapter's `identify()` has the details.
 
 ### Auto-generating `[[mapping]]` entries (`--infer-mappings`)
 
@@ -340,79 +308,68 @@ presence probe. See each adapter's `identify()` for details.
 cargo run --bin preamp-bridge -- init --output bridge.toml --infer-mappings
 ```
 
-Dante carries its own audio-routing/subscription protocol, separate from
-every vendor's preamp-control protocol this bridge speaks elsewhere (see
-`crates/discovery/src/dante_control.rs`). With this flag, `init` also
-queries each identified device's current RX channel subscriptions and,
-for every subscription pointing at another device already in the
-generated `bridge.toml`, writes a `[[mapping]]` entry for it.
+Dante has its own audio routing and subscription protocol, separate from every vendor's
+preamp-control protocol the bridge speaks elsewhere (see `crates/discovery/src/dante_control.rs`).
+With this flag, `init` also asks each identified device for its current RX channel subscriptions,
+and writes a `[[mapping]]` entry for every subscription that points at another device already in
+the generated `bridge.toml`.
 
-This is a real signal — it comes from watching live patching, not a
-guess — but it comes with one real caveat: the channel numbers it writes
-are *Dante audio channel numbers*. Whether that's the same as the
-preamp/headamp channel number a vendor adapter addresses is a
-default-configuration convention on most gear (Dante channel order
-mirrors physical I/O order 1:1 out of the box), not a protocol
-guarantee — a console with customized Dante patching can break this
-assumption silently. That's why it's opt-in rather than the default, and
-why the written file gets a header comment calling this out explicitly.
-Treat inferred mappings as a first draft to verify against each
-adapter's channel numbering, not a final answer.
+It's a proper signal, read from live patching rather than guessed, with one catch: the channel
+numbers it writes are *Dante audio channel numbers*. On most gear those match the
+preamp/headamp channel number a vendor adapter addresses, because out of the box Dante channel
+order mirrors physical I/O order 1:1. That's a default-configuration convention, though, and no
+protocol guarantees it. A console with customised Dante patching can break it without a word.
+That's why it's opt-in rather than the default, and why the file it writes gets a header comment
+saying so. Treat inferred mappings as a first draft to check against each adapter's channel
+numbering.
 
-Editing `bridge.toml` while the bridge is running hot-reloads the mapping
-table. The device list itself is no longer restart-only either: the
-patch-bay web UI (below) can add and remove devices (real or virtual) and
-mappings, all live.
+Editing `bridge.toml` while the bridge is running hot-reloads the mapping table. The device list
+doesn't need a restart any more either: the patch-bay web UI (below) can add and remove devices,
+real or virtual, and mappings, all live.
 
 ## Preamp Control — Patch-bay web UI
 
 ![Patch-bay web UI: the Patch tab, with source devices on the left and destination devices on the right, each a rack strip of numbered channel jacks, and green patch cables joining mapped channels](docs/screenshots/patch-bay.png)
 
-*Real screenshot of the running web UI (`preamp-bridge run`). The devices shown are **virtual** placeholders so the UI can be demoed without any hardware on the network — see "Device management" below.*
+*An actual screenshot of the running web UI (`preamp-bridge run`). The devices are **virtual**
+placeholders, so the UI can be demoed without any hardware on the network (see "Device
+management" below).*
 
-`run` also serves a web UI, bound by default to `0.0.0.0:8080` so anyone
-on the LAN can reach it at `http://<this-machine's-IP>:8080` - no
-separate app to install, just a browser, from any device on the network.
-Change the bind with `--web-bind` (e.g. `--web-bind 127.0.0.1:8080` to
-restrict it to this machine only), or turn it off entirely with
-`--no-web`. Like the rest of this bridge, there's no auth or TLS - same
-trust model as a hardware router's control port, meant for a trusted
-operations network, not the open internet.
+`run` also serves a web UI, bound by default to `0.0.0.0:8080`, so anyone on the LAN can reach it
+at `http://<this-machine's-IP>:8080` from a browser on any device. There's no separate app to
+install. Change the bind with `--web-bind` (`--web-bind 127.0.0.1:8080` keeps it to this machine),
+or switch it off with `--no-web`. Like the rest of the bridge, it has no auth and no TLS: the same
+trust model as a hardware router's control port, meant for a trusted operations network and not
+the open internet.
 
-`run` also takes `--plugins-dir <path>` (default `plugins`) - scanned at
-startup for dynamically-loadable device plugin `.so`/`.dylib`/`.dll`
-files, alongside the compiled-in vendors. See "Plugin Architecture" above.
+`run` also takes `--plugins-dir <path>` (default `plugins`), which it scans at startup for
+dynamically loadable device plugin `.so`/`.dylib`/`.dll` files to load alongside the compiled-in
+vendors (see "Plugin Architecture" above).
 
-- **Patch tab** — every device drawn as a line-art rack strip with
-  numbered channel jacks, sources on the left and destinations on the
-  right (like a hardware patch-bay screen). Click a source channel then a
-  destination channel to connect them; click the patch cable to
-  disconnect.
-- **Crosspoint tab** — the same mappings as a matrix, scoped to channels
-  that are actually mapped (a full all-channels grid across even two
-  devices would be tens of thousands of cells). Pin a device to bring all
-  its channels into the grid on demand.
-- **Device management** — add real devices (connects immediately, same
-  as a config-declared one) or **virtual** devices: placeholders for the
-  not-yet-built emulation layer, with a chosen channel count and no live
-  connection, so a mapping topology can be designed before the emulation
-  exists to back it.
-- **Export as TOML** — since devices/mappings added through the UI are
-  in-memory only (they don't survive a restart, matching how this
-  project's config hot-reload has always worked), a button exports the
-  current state so it can be pasted into `bridge.toml` to keep it.
+- **Patch tab:** every device drawn as a line-art rack strip with numbered channel jacks, sources
+  on the left and destinations on the right, like a hardware patch-bay screen. Click a source
+  channel, then a destination channel, to connect them. Click the patch cable to disconnect.
+- **Crosspoint tab:** the same mappings as a matrix, showing only channels that are actually
+  mapped (a full grid of every channel across even two devices would run to tens of thousands of
+  cells). Pin a device to bring all its channels into the grid when you want them.
+- **Device management:** add real devices (they connect straight away, same as one declared in
+  the config) or **virtual** ones. A virtual device is a placeholder for the emulation layer that
+  isn't built yet, with a channel count you choose and no live connection, so you can design a
+  mapping topology before there's any emulation to back it.
+- **Export as TOML:** devices and mappings added through the UI only live in memory and are gone
+  after a restart (which matches how the config hot-reload has always worked), so this button
+  exports the current state for you to paste into `bridge.toml` and keep.
 
-Removing a real device calls its adapter's `disconnect()` (cancellation
-token torn down through the background socket task, port actually
-freed), not just a drop from a list - every adapter implements this, so
-add/remove works the same way whether a device is real or virtual.
+Removing a real device calls its adapter's `disconnect()`, which tears the cancellation token down
+through the background socket task and actually frees the port, rather than just dropping the
+device from a list. Every adapter implements this, so adding and removing work the same way
+whether a device is real or virtual.
 
 ## Preamp Control — Config format
 
-See [`bridge.example.toml`](bridge.example.toml) for a worked example
-covering all four built-in device kinds. `kind` is an open string, not a
-fixed list — a loaded plugin (see "Plugin Architecture" above) can
-register additional kinds beyond the ones this repo ships. Shape:
+[`bridge.example.toml`](bridge.example.toml) is a worked example covering all four built-in device
+kinds. `kind` is an open string rather than a fixed list: a loaded plugin (see "Plugin
+Architecture" above) can register kinds beyond the ones this repo ships. The shape:
 
 ```toml
 [[device]]
@@ -433,13 +390,12 @@ to   = { device = "x32-monitors", channel = 7 }
 bidirectional = true
 ```
 
-`channel` means whatever the underlying protocol's native addressing
-unit is — an X32 headamp number, a dLive physical preamp Socket number
-(distinct from processing channel), a DM3 Local Input number, etc. See
-the relevant adapter's module doc comment for exact ranges. `address` is
-required for every non-virtual device; `channels` is optional for real
-devices (defaults to the kind's documented channel count) and required
-for kinds with none documented (`ah-midi`, `yamaha`).
+`channel` means whatever the underlying protocol's own addressing unit is: an X32 headamp number,
+a dLive physical preamp Socket number (which isn't the processing channel), a DM3 Local Input
+number, and so on. The relevant adapter's module doc comment has the exact ranges. `address` is
+required for every device that isn't virtual. `channels` is optional for real devices (it
+defaults to the kind's documented channel count) and required for kinds that don't document one
+(`ah-midi`, `yamaha`).
 
 ## Radio Mic Telemetry — Status
 
@@ -451,42 +407,39 @@ for kinds with none documented (`ah-midi`, `yamaha`).
 | Lectrosonics | DSQD / D Squared, Duet | Ethernet control port | ⚠️ **Placeholder wire format** — scaffold only, NOT built from an authoritative spec; correct the bytes + set the real port before use. See adapter's module comment |
 | Shure | QLX-D **mounted on a console** | ANSI E1.17 ACN (SLPv2 + SDT/DMP over UDP) | Discovery + passive telemetry, reverse-engineered from real hardware. **Read-only, and needs a mirrored port** — the receiver unicasts its events to the console. Cannot open its own session; see the adapter's module comment |
 
-The Shure and Sennheiser adapters are built from official vendor specs
-(see each adapter's module doc comment for the exact document and URL)
-and unit/integration tested against mocked sockets — same "no guessed
-wire framing" discipline as the preamp adapters, and likewise **not yet
-validated against real hardware**.
+The Shure and Sennheiser adapters are built from official vendor specs (each adapter's module doc
+comment gives the document and URL) and have unit and integration tests against mocked sockets.
+They follow the same rule as the preamp adapters, no guessed wire framing, and likewise are **not
+yet validated against real hardware**.
 
-The **Lectrosonics** adapter is the one exception to that discipline and
-is flagged as such: no equivalent open protocol document was available,
-so its framing, port and field mappings are an unverified **placeholder**
-(mirroring the RFutils adapter of the same name), isolated so a packet
-capture or the official IP-control spec can correct them in one file. It
-keeps the same no-fabrication rule for what it *does* report — audio dBFS
-and RF dBm stay `None` rather than being invented — but treat it as a
-scaffold, not a working adapter, until the wire format is confirmed.
+The **Lectrosonics** adapter is the one exception to that rule, and it's flagged as such. There
+was no equivalent open protocol document, so its framing, port and field mappings are an
+unverified **placeholder** (mirroring the RFutils adapter of the same name), all in one file so a
+packet capture or the official IP-control spec can put them right in one go. It still won't
+make anything up in what it *does* report: audio dBFS and RF dBm stay `None` rather than being
+invented. Until the wire format is confirmed, treat it as a scaffold rather than a working
+adapter.
 
 [`docs/mic-telemetry-architecture`](docs/mic-telemetry-architecture.md)
 ([PDF](docs/mic-telemetry-architecture.pdf), [HTML](docs/mic-telemetry-architecture.html))
-diagrams why this domain has its own trait, both vendors' wire protocols
-sequence-by-sequence, and exactly what ends up in `MicState` per vendor.
+diagrams why this domain has its own trait, walks through both vendors' wire protocols sequence by
+sequence, and shows what ends up in `MicState` for each vendor.
 
-[`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md) is a
-different kind of document: a protocol note reverse-engineered from a capture of a
-real QL1 and Rio3224-D2, showing that Yamaha head-amp control is a proprietary
-block tunnelled inside Dante ConMon rather than anything in Audinate's own control
-protocols. It is observation, not validation — see its closing section.
+[`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md) is a different sort
+of document: a protocol note reverse-engineered from a capture of a real QL1 and Rio3224-D2. It
+shows that Yamaha head-amp control is a proprietary block tunnelled inside Dante ConMon rather
+than anything in Audinate's own control protocols. It's observation rather than validation (see
+its closing section).
 
-This domain is a different shape from preamp control: telemetry is
-read-heavy (battery, RF level, audio level are monitoring-only; mute is
-the only realistic write), so it has its own `MicAdapter` trait and
-`MicState` type (`crates/mic-core`) rather than extending the preamp
-`DeviceAdapter`/`Router` — see that crate's module doc comment for why.
+This domain is a different shape from preamp control. Telemetry is mostly reading: battery, RF
+level and audio level are monitoring only, and mute is the only write anyone's likely to want.
+So it has its own `MicAdapter` trait and `MicState` type (`crates/mic-core`) rather than
+extending the preamp `DeviceAdapter`/`Router`, and that crate's module doc comment explains why.
 
-Because every adapter only ever talks to a device's IP control channel,
-support here is **Dante-optional by construction** — it works the same
-whether or not the specific unit has a Dante audio card installed, since
-Dante audio is never touched at all.
+Because every adapter only ever talks to a device's IP control channel, support here is
+**Dante-optional by construction**. It works the same whether or not the unit has a Dante audio
+card fitted, since Dante audio is never touched at all. An odd thing for a Dante bridge to
+boast about, but there it is.
 
 ## Radio Mic Telemetry — Architecture
 
@@ -508,10 +461,9 @@ cp mics.example.toml mics.toml   # edit for your rig
 cargo run --bin mic-monitor -- watch --config mics.toml
 ```
 
-`mic-monitor discover` reuses the same Dante mDNS browse as
-`preamp-bridge discover` — a convenience for Dante-enabled units, not a
-requirement; anything else (including hardware with no Dante card at
-all) is configured directly by IP in `mics.toml`.
+`mic-monitor discover` uses the same Dante mDNS browse as `preamp-bridge discover`. It's a
+convenience for units that have Dante, not a requirement: anything else, including hardware with
+no Dante card at all, goes into `mics.toml` directly by IP.
 
 ## Radio Mic Telemetry — Config format
 
@@ -523,82 +475,72 @@ address = "10.0.0.30"
 port = 2202                 # optional, defaults to the protocol's standard port (2202 Shure, 45 Sennheiser, 4992 Lectrosonics placeholder)
 ```
 
-No `[[mapping]]` section — this domain is pure monitoring, nothing to
-route between devices (yet; see below).
+There's no `[[mapping]]` section. This domain is pure monitoring, so there's nothing to route
+between devices (yet; see below).
 
-**Not yet built:** emulating a supported vendor's telemetry protocol on a
-host console (e.g. making a Yamaha QL's Wireless Monitor screen show
-synthesized ULX-D-shaped data for a mic it doesn't natively support) —
-the same class of problem as preamp device emulation above, needing
-packet captures of a real console+device pairing to learn the display's
-own query/identity handshake. Deferred until there's real hardware
-access.
+**Not yet built:** emulating a supported vendor's telemetry protocol on a host console, for
+example making a Yamaha QL's Wireless Monitor screen show synthesised, ULX-D-shaped data for a mic
+it doesn't support natively. It's the same kind of problem as preamp device emulation above, and
+needs packet captures of a real console and device paired up to learn the display's own query
+and identity handshake. It's on hold until there's real hardware to work with.
 
 ## Windows SmartScreen & Defender Firewall
 
-macOS builds are **Developer ID-signed and notarised by Apple** — they open
-normally, with no Gatekeeper warning and no quarantine step. The Windows
-binaries are **not** code-signed, so Windows still warns you the first time.
+The macOS builds are **Developer ID-signed and notarised by Apple**, so they open normally, with
+no Gatekeeper warning and no quarantine step. The Windows binaries **aren't** code-signed, so
+Windows still warns you the first time.
 
-- **Windows** — SmartScreen shows *"Windows protected your PC"* →
-  **More info** → **Run anyway**.
-- **Windows Defender Firewall** — first launch pops *"Allow Dante-BabelBox to
-  communicate on these networks"*. Tick **Private** (and **Domain** on a managed
-  network) — Dante-BabelBox needs it to serve the patch-bay UI and reach preamps and
-  radio-mic receivers on the audio LAN. Deny it and no devices will be discovered and
-  gain/phantom changes won't reach the hardware.
-- **Linux** — no signing gate.
+- **Windows:** SmartScreen shows *"Windows protected your PC"* → **More info** → **Run anyway**.
+- **Windows Defender Firewall:** the first launch pops up *"Allow Dante-BabelBox to communicate
+  on these networks"*. Tick **Private** (and **Domain** on a managed network). Dante-BabelBox
+  needs it to serve the patch-bay UI and reach preamps and radio-mic receivers on the audio LAN.
+  If you deny it, no devices will be discovered and gain and phantom changes won't reach the
+  hardware.
+- **Linux:** no signing gate.
 
-Per-artifact steps, self-signing, checksum verification and the Defender Firewall reset
-procedure: **[docs/UNSIGNED.md](docs/UNSIGNED.md)**.
+Per-artifact steps, self-signing, checksum verification and how to reset the Defender Firewall
+are in **[docs/UNSIGNED.md](docs/UNSIGNED.md)**.
 
 ## Roadmap / TODO
 
-- [ ] **Implement the Yamaha R-series adapter** — **ready to build now.** The wire format is captured, decoded and verified on a real Rio3224-D2 in [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md), including a reference implementation that reproduces a packet the stagebox accepted. Gain (int16 centi-dB) and phantom (uint8) map straight onto `PreampState`. This is the most shovel-ready item on the list.
-- [ ] **Map the remaining Yamaha subops** — eight 32-element arrays (`0x0722` subops `10`,`12`,`13`,`15`,`18`–`1b`) that almost certainly include pad, HPF and polarity, but were never observed populated. A ten-minute capture with hardware resolves them; the procedure is written up in the doc.
-- [ ] **Capture DT Preamp Control driving a real DT168 / DT164-W** — `crates/preamp-adapter-ah::dt` builds and parses the `AllenHth` ConMon vendor payload (gain/pad/+48 V for 16 preamps), but from static RE only, with no capture to anchor it. One capture of the app setting a gain settles every [OPEN] in [`docs/allenheath-dt-preamp-over-dante.md`](docs/allenheath-dt-preamp-over-dante.md): the ConMon envelope, the `u16` gain byte order, the UWORD→dB scale, the set-message field offsets. The same capture pointed at an **SQ** would confirm whether the console answers the same messages (its Dante card registers the same namespace).
-- [ ] **Give the Aphex 1788A codec a transport** — `crates/preamp-adapter-aphex` builds and parses the SysEx correctly but nothing delivers it. Two candidate paths, and the choice decides whether this becomes an ordinary socket adapter or the first device here needing a MIDI backend (plus ALSA headers in Linux release CI): the documented MIDI layer, or the unit's Ethernet port, whose SysEx framing isn't published. A capture, or ten minutes with a 1788A, settles it — along with whether "Mic Channel" counts from 0 or 1 and what a `20h` dump reply looks like.
-- [ ] **Validate the adapters against real hardware** — every adapter is currently tested only against mock devices; no adapter has been run on live gear.
-- [ ] **Migrate the radio-mic domain onto plugins + OCA** — give it a `Router` in the process (it has none today, since it's pure monitoring), so telemetry mapping/web-UI parity comes for free.
-- [ ] **Ship plugin binaries in release CI** — `.github/workflows/release.yml` builds only the two host binaries today; building/packaging all six `crates/plugin-*` `cdylib`s per platform is a real CI expansion, not yet done.
-- [ ] **Get a third-party head-amp capture** — a Focusrite MP8R or, better, a **Rupert Neve RMP-D8**, driven from a CL/QL/PM/DM7. Both can act as Yamaha head amps, which would reuse the `MBC` work wholesale, and Rupert Neve state the RMP-D8 appears to the console *as a native Rio* — the exact device already captured. Nothing about either can be derived from the QL1/Rio captures, since neither was on that network; [`docs/rednet-mp8r-capture-request.md`](docs/rednet-mp8r-capture-request.md) says exactly what a three-minute capture would need to contain.
-- [ ] **Preamp device emulation** — make the bridge answer as a native device of a foreign brand so a console's own preamp UI controls it directly (needs packet captures of a real console+device pairing).
-- [ ] **Telemetry emulation on a host console** — e.g. surface ULX-D-shaped data on a Yamaha QL Wireless Monitor screen (same capture-dependent problem).
-- [ ] **More preamp vendors** — Yamaha CL/QL/DM7, Yamaha Rio/Tio; blocked on missing public control specs or wire-format captures. (Allen & Heath Qu/SQ is now scaffolded via the DT `AllenHth` ConMon codec — see the capture item above.) The plugin path (see below) means these no longer need to land in this repo to exist.
-- [ ] **Wing** — currently only its 8 built-in preamps; extend to remote stagebox preamps.
+- [ ] **Implement the Yamaha R-series adapter**, which is **ready to build now.** The wire format is captured, decoded and verified on a real Rio3224-D2 in [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md), including a reference implementation that reproduces a packet the stagebox accepted. Gain (int16 centi-dB) and phantom (uint8) map straight onto `PreampState`. It's the most shovel-ready item on the list.
+- [ ] **Map the remaining Yamaha subops:** eight 32-element arrays (`0x0722` subops `10`,`12`,`13`,`15`,`18`–`1b`) that almost certainly include pad, HPF and polarity, but were never seen populated. A ten-minute capture with the hardware resolves them, and the doc has the procedure.
+- [ ] **Capture DT Preamp Control driving a real DT168 / DT164-W.** `crates/preamp-adapter-ah::dt` builds and parses the `AllenHth` ConMon vendor payload (gain/pad/+48 V for 16 preamps), but only from static RE, with no capture to anchor it. One capture of the app setting a gain settles every [OPEN] in [`docs/allenheath-dt-preamp-over-dante.md`](docs/allenheath-dt-preamp-over-dante.md): the ConMon envelope, the `u16` gain byte order, the UWORD→dB scale and the set-message field offsets. The same capture pointed at an **SQ** would show whether the console answers the same messages (its Dante card registers the same namespace).
+- [ ] **Give the Aphex 1788A codec a transport.** `crates/preamp-adapter-aphex` builds and parses the SysEx correctly, but nothing delivers it. There are two candidate paths: the documented MIDI layer, or the unit's Ethernet port, whose SysEx framing isn't published. The choice decides whether this becomes an ordinary socket adapter or the first device here that needs a MIDI backend (plus ALSA headers in Linux release CI). A capture, or ten minutes with a 1788A, settles it, along with whether "Mic Channel" counts from 0 or 1 and what a `20h` dump reply looks like.
+- [ ] **Validate the adapters against real hardware.** Every adapter is currently tested only against mock devices; no adapter has been run on live gear.
+- [ ] **Migrate the radio-mic domain onto plugins + OCA:** give it a `Router` in the process (it hasn't got one today, since it's pure monitoring), so telemetry mapping and parity with the web UI come for free.
+- [ ] **Ship plugin binaries in release CI.** `.github/workflows/release.yml` only builds the two host binaries today. Building and packaging all six `crates/plugin-*` `cdylib`s per platform is a proper expansion of the CI, and it isn't done yet.
+- [ ] **Get a third-party head-amp capture:** a Focusrite MP8R or, better, a **Rupert Neve RMP-D8**, driven from a CL/QL/PM/DM7. Both can act as Yamaha head amps, which would reuse the `MBC` work wholesale, and Rupert Neve say the RMP-D8 appears to the console *as a native Rio*, which is the very device already captured. Nothing about either can be worked out from the QL1/Rio captures, since neither was on that network. [`docs/rednet-mp8r-capture-request.md`](docs/rednet-mp8r-capture-request.md) says what a three-minute capture would need to contain.
+- [ ] **Preamp device emulation:** make the bridge answer as a native device of a foreign brand, so a console's own preamp UI controls it directly (needs packet captures of a real console and device paired together).
+- [ ] **Telemetry emulation on a host console:** for example, putting ULX-D-shaped data on a Yamaha QL Wireless Monitor screen (the same problem, and it needs captures too).
+- [ ] **More preamp vendors:** Yamaha CL/QL/DM7 and Yamaha Rio/Tio, held up by missing public control specs or wire-format captures. (Allen & Heath Qu/SQ now has scaffolding via the DT `AllenHth` ConMon codec; see the capture item above.) Thanks to the plugin path (see below), these don't have to land in this repo to exist.
+- [ ] **Wing:** only its 8 built-in preamps so far. Extend it to remote stagebox preamps.
 
 ## Contributing a new adapter
 
-Two ways to add device support, both expecting the same underlying
-discipline: read the official (or community-authoritative) protocol doc
-and implement against it exactly — never guess wire framing — with unit
-tests against the spec's own worked examples and an integration test
-through a mock socket. Several vendors here (preamp: Qu/SQ, CL/QL,
-Rio/Tio) are deliberately left unimplemented because no public spec
-covers the relevant control; closing those gaps needs a real spec or
-packet captures from real hardware, not assumptions.
+There are two ways to add device support, and both come with the same rule: read the official (or
+community-authoritative) protocol doc and implement against it to the letter, with unit tests
+against the spec's own worked examples and an integration test through a mock socket. Never guess
+the wire framing. Several vendors here (preamp: Qu/SQ, CL/QL, Rio/Tio) are left unimplemented on
+purpose because no public spec covers the control in question, and filling those gaps needs a
+real spec or packet captures from real hardware rather than assumptions.
 
-**Rio/Tio is no longer in that category.** The packet captures exist, the
-protocol is decoded, and a message built from the write-up was accepted by a
-real Rio3224-D2 — see
-[`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md).
-It stays on the TODO list as unimplemented work, not as a blocked unknown.
+**Rio/Tio isn't in that category any more.** The packet captures exist, the protocol's decoded,
+and a real Rio3224-D2 accepted a message built from the write-up (see
+[`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md)). It stays on the
+TODO list as work still to do rather than as a blocked unknown.
 
-- **In-process** (lands in this repo) — implement the relevant trait
-  (`DeviceAdapter` for preamp control, `MicAdapter` for radio-mic
-  telemetry) directly, compiled into the workspace. This is how the
-  radio-mic adapters (Shure, Sennheiser) work today - the preamp domain
-  has fully moved to the plugin path below, though a not-yet-bespoke
-  vendor can still start here and move to `LegacyPluginBridge` later
-  (see `crates/plugin-osc-wing` for what that migration looks like).
-- **Plugin** (doesn't need to touch this repo at all) — implement
-  `dante-babelbox-oca-plugin-abi`'s `PluginAdapter` trait, compile as a
-  `cdylib`, and it loads into any `preamp-bridge` build via
-  `--plugins-dir`. See
-  [`docs/plugin-development-guide.md`](docs/plugin-development-guide.md)
-  for the full contract and a worked reference
-  (`crates/plugin-osc-x32`). This is the path for shipping support for a
-  device without waiting on (or needing) a PR here.
+- **In-process** (lands in this repo): implement the relevant trait (`DeviceAdapter` for preamp
+  control, `MicAdapter` for radio-mic telemetry) directly, compiled into the workspace. That's how
+  the radio-mic adapters (Shure, Sennheiser) work today. The preamp domain has moved over to the
+  plugin path entirely, though a vendor without its own plugin can still start here and move to
+  `LegacyPluginBridge` later (`crates/plugin-osc-wing` shows what that move looks like).
+- **Plugin** (doesn't touch this repo at all): implement the `PluginAdapter` trait from
+  `dante-babelbox-oca-plugin-abi`, compile it as a `cdylib`, and it loads into any
+  `preamp-bridge` build via `--plugins-dir`.
+  [`docs/plugin-development-guide.md`](docs/plugin-development-guide.md) has the full contract and
+  a worked reference (`crates/plugin-osc-x32`). This is the way to ship support for a device
+  without waiting on a PR here, or needing one at all.
 
 <!-- attributions:start -->
 This project is built on other people's work — see [ATTRIBUTIONS.md](ATTRIBUTIONS.md).

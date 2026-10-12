@@ -1,27 +1,32 @@
 # Dante-BabelBox user guide
 
-Dante-BabelBox is **a cross-vendor Dante control bridge**. Dante carries audio and basic device
-discovery, but nothing about preamp gain, phantom power or wireless-mic status — each vendor
-layers its own proprietary control protocol on top of the same network. This translates between
-them, so state on one vendor's device is usable from outside its own ecosystem.
+Dante-BabelBox is a cross-vendor Dante control bridge: it translates between manufacturers'
+control protocols, so you can set preamp gain and phantom power and read wireless-mic status
+across consoles, stageboxes and receivers that don't otherwise talk to each other.
 
-It covers two separate domains:
+Dante carries your audio and basic device discovery, and there it stops. Preamp gain, phantom
+power and wireless-mic status are left to each vendor, and each one runs its own proprietary
+control protocol over the same network, none of which understands the others. Hence the name:
+this does the translating, so the state of one vendor's device can be used from outside that
+vendor's own kit.
 
-- **Preamp control** — bridging gain and phantom power across consoles and stageboxes from
+It does two separate jobs:
+
+- **Preamp control:** gain and phantom power bridged across consoles and stageboxes from
   different vendors, with a patch-bay web UI.
-- **Radio-mic telemetry** — battery, RF and audio level from wireless receivers, across vendors,
-  **whether or not the hardware has a Dante audio option installed** — because the adapters only
+- **Radio-mic telemetry:** battery, RF and audio level from wireless receivers, across vendors,
+  **whether or not the hardware has a Dante audio option installed**, because the adapters only
   ever talk to a device's IP control channel and never touch Dante audio at all.
 
-> **Before you rely on this:** adapters are built against official or community-authoritative
-> vendor protocol specs, not guesswork, and are tested against mock devices. But **no adapter has
-> been validated against real hardware**, and the **Lectrosonics mic adapter's wire format is an
-> unverified placeholder** — a scaffold, not a working adapter.
+> **Before you rely on this:** the adapters are built against official or community-authoritative
+> vendor protocol specs rather than guesswork, and tested against mock devices. But **no adapter
+> has been validated against real hardware**, and the **Lectrosonics mic adapter's wire format is
+> an unverified placeholder**, so it's a scaffold rather than a working adapter.
 >
-> **One thing has been proven on hardware**, and it is worth knowing which: the Yamaha R-series HA
+> **One thing has been proven on hardware**, and it's worth knowing which. The Yamaha R-series HA
 > protocol was captured from a real QL1 + Rio3224-D2, decoded, documented, rebuilt from that
-> documentation and transmitted back — and the stagebox accepted it and changed its gain. That is
-> a *protocol* proven on hardware, not *code*: the write came from a standalone script, and the
+> documentation and sent back, and the stagebox accepted it and changed its gain. That proves the
+> *protocol* on hardware, but not any *code*: the write came from a standalone script, and the
 > Rio adapter is still unimplemented. See
 > [yamaha-ha-remote-over-dante.md](yamaha-ha-remote-over-dante.md).
 >
@@ -53,22 +58,22 @@ It covers two separate domains:
 | Sennheiser | EW-DX EM 2 / EM 2 Dante / EM 4 Dante | SSC (JSON over UDP) | Done |
 | Lectrosonics | DSQD / Duet | Ethernet control port | **Placeholder wire format — correct the bytes and the port before use** |
 
-The Lectrosonics adapter keeps the project's no-fabrication rule for what it *reports* — audio
-dBFS and RF dBm stay unset rather than being invented — but treat it as a scaffold until the wire
-format is confirmed.
+The Lectrosonics adapter still won't make anything up in what it *reports* (audio dBFS and RF dBm
+stay unset rather than being invented), but treat it as a scaffold until the wire format is
+confirmed.
 
 ---
 
 ## Getting a bridge running
 
-**1. See what is on the network.**
+**1. See what's on the network.**
 
 ```sh
 cargo run --bin preamp-bridge -- discover
 ```
 
-This browses Dante's own mDNS advertisements. It tells you what is there; it does not tell you
-what this bridge can drive.
+This browses Dante's own mDNS advertisements. It tells you what's there. Whether this bridge can
+drive it is another matter.
 
 **2. Generate a config.**
 
@@ -77,15 +82,16 @@ cargo run --bin preamp-bridge -- init --output bridge.toml
 ```
 
 `init` discovers devices and probes each one against every implemented adapter's `identify()`
-until one claims it. **Confidence varies by protocol, and it is worth knowing which you are
+until one claims it. **How sure it is depends on the protocol, and it's worth knowing which you're
 getting:**
 
 - **X32-family and Wing** confirm vendor *and* model, from documented replies.
-- **AHM and dLive** confirm the protocol family only — their specs have no model-string query.
+- **AHM and dLive** confirm the protocol family only, because their specs have no model-string
+  query.
 - **DM3 is the weakest signal**: its spec documents no identify query at all, so a scene-status
   request is reused as a presence probe.
 
-**`[[mapping]]` entries are not generated by default** — add them by hand, or see below.
+**`[[mapping]]` entries aren't generated by default.** Add them by hand, or see below.
 
 **3. Run it.**
 
@@ -103,60 +109,60 @@ Editing `bridge.toml` while the bridge runs **hot-reloads the mapping table**.
 cargo run --bin preamp-bridge -- init --output bridge.toml --infer-mappings
 ```
 
-With this flag, `init` also queries each identified device's current Dante RX subscriptions and
-writes a `[[mapping]]` for every subscription pointing at another device in the file. It is a real
-signal — it comes from watching live patching, not from guessing.
+With this flag, `init` also asks each identified device for its current Dante RX subscriptions,
+and writes a `[[mapping]]` for every subscription that points at another device in the file. It's
+a proper signal, read from live patching rather than guessed.
 
-> **One real caveat, and it is why this is opt-in.** The channel numbers it writes are **Dante
-> audio channel numbers**. Whether those match the preamp/headamp channel a vendor adapter
-> addresses is a *default-configuration convention* on most gear — Dante channel order mirrors
-> physical I/O order 1:1 out of the box — **not a protocol guarantee**. A console with customised
-> Dante patching breaks the assumption silently.
+> **One catch, and it's why this is opt-in.** The channel numbers it writes are **Dante audio
+> channel numbers**. On most gear those match the preamp/headamp channel a vendor adapter
+> addresses, because out of the box Dante channel order mirrors physical I/O order 1:1. That's a
+> *default-configuration convention*, **not a protocol guarantee**, and a console with customised
+> Dante patching breaks the assumption without telling you.
 >
-> Treat inferred mappings as a first draft to verify against each adapter's channel numbering.
+> Treat inferred mappings as a first draft to check against each adapter's channel numbering.
 
 ---
 
 ## The patch-bay web UI
 
-`run` also serves a web UI, bound by default to `0.0.0.0:8080` — reachable from any browser on the
-LAN at `http://<this-machine's-IP>:8080`.
+`run` also serves a web UI, bound by default to `0.0.0.0:8080`, so any browser on the LAN can
+reach it at `http://<this-machine's-IP>:8080`.
 
 ![The Patch tab: source devices on the left and destination devices on the right, each drawn as a rack strip of numbered channel jacks, with green patch cables joining mapped channels.](screenshots/patch-bay.png)
 
-*A real screenshot of the running web UI. The devices shown are **virtual** placeholders, so the
-UI can be demonstrated with no hardware on the network.*
+*An actual screenshot of the running web UI. The devices are **virtual** placeholders, so the UI
+can be shown with no hardware on the network.*
 
-- **Patch tab** — click a source channel, then a destination channel, to connect them; click a
+- **Patch tab:** click a source channel, then a destination channel, to connect them. Click a
   patch cable to disconnect.
-- **Crosspoint tab** — the same mappings as a matrix, scoped to channels that are actually mapped.
-  A full all-channels grid across even two devices would be tens of thousands of cells, so pin a
-  device to bring all its channels into the grid on demand.
-- **Gain lock tab** — when `bridge.toml` has a `[gain_lock]` table: elect the leader desk, lock
-  and unlock, set the leader's preamp gains, and see what the lock has done to each follower's trim.
-  See [Gain compensation](#gain-compensation-the-gain-lock) below.
-- **Device management** — add real devices (connects immediately) or **virtual** ones.
-- **Export as TOML** — devices and mappings added through the UI are **in-memory only and do not
+- **Crosspoint tab:** the same mappings as a matrix, showing only channels that are actually
+  mapped. A full grid of every channel across even two devices would run to tens of thousands of
+  cells, so pin a device to bring all its channels into the grid when you need them.
+- **Gain lock tab:** when `bridge.toml` has a `[gain_lock]` table, this is where you elect the
+  leader desk, lock and unlock, set the leader's preamp gains, and see what the lock has done to
+  each follower's trim. See [Gain compensation](#gain-compensation-the-gain-lock) below.
+- **Device management:** add real devices (they connect straight away) or **virtual** ones.
+- **Export as TOML:** devices and mappings added through the UI are **in memory only and don't
   survive a restart**. This button exports the current state so you can paste it into
   `bridge.toml` and keep it.
 
 Change the bind with `--web-bind 127.0.0.1:8080` to restrict it to this machine, or turn it off
 with `--no-web`.
 
-> **There is no authentication and no TLS** — the same trust model as a hardware router's control
-> port. It belongs on a trusted operations network, not the open internet.
+> **There's no authentication and no TLS.** It's the same trust model as a hardware router's
+> control port, so it belongs on a trusted operations network, not the open internet.
 
 ### What "virtual" means
 
-A virtual device is a placeholder for a **not-yet-built emulation layer**. Today the bridge is a
-translating router you configure by IP and channel — genuinely useful, but not invisible to the
-consoles. Making it answer as if it *is* a native device of a foreign brand, so a console's own
-preamp UI drives it directly, needs packet captures of real gear paired with its own native
-device, and none of that handshake is in any public spec.
+A virtual device is a placeholder for an **emulation layer that isn't built yet**. Today the
+bridge is a translating router you set up by IP and channel. That's useful, but the consoles can
+still tell it's there. Making it answer as if it *is* a native device of a foreign brand, so a
+console's own preamp UI drives it directly, needs packet captures of real gear paired with its own
+native device, and none of that handshake is in any public spec.
 
-Virtual devices let you design the intended topology now, before the emulation exists to back it.
-If you can help with those captures, [`docs/`](.) has a non-technical field guide, one edition per
-OS: [Windows](capture-guide-windows.md) · [macOS](capture-guide-macos.md) ·
+Virtual devices let you design the topology you want now, before there's any emulation to back
+it. If you can help with those captures, [`docs/`](.) has a non-technical field guide, one edition
+per OS: [Windows](capture-guide-windows.md) · [macOS](capture-guide-macos.md) ·
 [Linux](capture-guide-linux.md).
 
 ---
@@ -182,22 +188,23 @@ to   = { device = "x32-monitors", channel = 7 }
 bidirectional = true
 ```
 
-> **`channel` means whatever the underlying protocol's native addressing unit is** — an X32
-> headamp number (1–128: local 1–32, AES50-A 33–80, AES50-B 81–128), a dLive physical preamp **Socket** number (which is *not* the processing channel
-> number), a DM3 Local Input number. This is the single most likely thing to get wrong. Check the
-> relevant adapter's module doc comment for exact ranges.
+> **`channel` means whatever the underlying protocol's own addressing unit is:** an X32 headamp
+> number (1–128: local 1–32, AES50-A 33–80, AES50-B 81–128), a dLive physical preamp **Socket**
+> number (which is *not* the processing channel number), or a DM3 Local Input number. It's the
+> thing you're most likely to get wrong. Check the relevant adapter's module doc comment for the
+> exact ranges.
 
-`kind` is an open string, not a fixed list: a loaded plugin can register additional kinds. A fully
-worked example is in [`bridge.example.toml`](../bridge.example.toml).
+`kind` is an open string rather than a fixed list, so a loaded plugin can register more kinds.
+There's a fully worked example in [`bridge.example.toml`](../bridge.example.toml).
 
 ---
 
 ## Gain compensation (the gain lock)
 
-When several desks share one stage box, one desk owns the preamps. Any gain change it makes is
-heard by every other desk. Declare that desk the **leader**, name the **signals** the desks share,
-and **lock**: from then on each follower desk's digital trim takes the opposite of every leader gain
-change, so the followers' levels stay put.
+When several desks share one stage box, one desk owns the preamps, and every gain change it makes
+turns up on every other desk too, usually without warning. Declare that desk the **leader**, name
+the **signals** the desks share, and **lock**. From then on each follower desk's digital trim takes
+the opposite of every leader gain change, so the followers' levels stay put.
 
 ```toml
 [gain_lock]
@@ -211,16 +218,16 @@ members = [
 ]
 ```
 
-What to know before using it at a show:
+What to know before you use it at a show:
 
 - **Moves are relative.** The bridge reads each follower's live trim and moves it from there, so a
   trim change the monitor engineer makes mid-show is kept.
 - **Nothing is lost at a limit.** A trim that runs out of range keeps the difference and takes it
   back when the leader comes down. A desk that drops off the network gets the missed amount when
-  it returns.
+  it comes back.
 - **Followers today are X32/M32 and Wing.** They're the only protocols here that document a
   writable channel trim. Any device with a preamp can lead. On an X32 the documented trim covers
-  digital sources only; check it on a headamp-fed channel first.
+  digital sources only, so check it on a headamp-fed channel first.
 - **Tested against mock desks only.** No real desk has followed a leader yet.
 
 The full guide, with the rules, the desk survey and a first-rig checklist, is
@@ -230,9 +237,9 @@ The full guide, with the rules, the desk survey and a first-rig checklist, is
 
 ## Radio-mic telemetry
 
-A separate binary, because the domain is a different shape — telemetry is read-heavy (battery, RF
-and audio level are monitoring-only; mute is the only realistic write), so it has its own adapter
-trait rather than extending the preamp router.
+This is a separate binary, because the domain is a different shape. Telemetry is mostly reading
+(battery, RF and audio level are monitoring only, and mute is the only realistic write), so it has
+its own adapter trait rather than extending the preamp router.
 
 ```sh
 cargo run --bin mic-monitor -- discover
@@ -240,21 +247,21 @@ cargo run --bin mic-monitor -- watch
 ```
 
 [mic-telemetry-architecture.md](mic-telemetry-architecture.md) diagrams both vendors' wire
-protocols sequence by sequence, and exactly what ends up in the reported state per vendor.
+protocols sequence by sequence, and shows what ends up in the reported state for each vendor.
 
 ---
 
 ## Adding a device the bridge doesn't support
 
-Device support loads two ways, and both look identical to the router and the web UI. The one that
-matters to you is **dynamic loading**: a plugin is a separate `.so`/`.dylib`/`.dll`, scanned from
-`--plugins-dir` (default `plugins`) at startup.
+Device support loads two ways, and the router and the web UI can't tell them apart. The one that
+matters to you is **dynamic loading**: a plugin is a separate `.so`/`.dylib`/`.dll`, picked up
+from `--plugins-dir` (default `plugins`) at startup.
 
-**Adding a vendor needs no recompile of this project at all** — build your plugin, drop the file
-in, restart the bridge. All five real preamp vendors already work this way.
+**Adding a vendor needs no recompile of this project at all.** Build your plugin, drop the file
+in and restart the bridge. All five real preamp vendors already work this way.
 
 [plugin-development-guide.md](plugin-development-guide.md) has the full contract, two worked
-examples, and the real pitfalls hit while building it.
+examples, and the pitfalls that turned up while building it.
 
 ---
 
@@ -276,11 +283,11 @@ examples, and the real pitfalls hit while building it.
 
 ## See also
 
-- [plugin-development-guide.md](plugin-development-guide.md) — adding a device without a PR
-- [mic-telemetry-architecture.md](mic-telemetry-architecture.md) — the telemetry domain in full
-- [yamaha-ha-remote-over-dante.md](yamaha-ha-remote-over-dante.md) — the protocol note proven
+- [plugin-development-guide.md](plugin-development-guide.md): adding a device without a PR
+- [mic-telemetry-architecture.md](mic-telemetry-architecture.md): the telemetry domain in full
+- [yamaha-ha-remote-over-dante.md](yamaha-ha-remote-over-dante.md): the protocol note proven
   against real hardware
 - [API.md](API.md) · [DEVELOPING.md](DEVELOPING.md)
 - Capture guides for helping build device emulation:
   [Windows](capture-guide-windows.md) · [macOS](capture-guide-macos.md) · [Linux](capture-guide-linux.md)
-- [README](../README.md) — status tables, architecture and downloads
+- [README](../README.md): status tables, architecture and downloads
