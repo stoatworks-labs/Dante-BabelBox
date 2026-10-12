@@ -116,7 +116,7 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 | Yamaha | DM3 / DM3S | OSC (UDP 49900) | Legacy transport, kind `yamaha-dm3`. Works (also run on the real DM3), but OSC `set` is unacknowledged and the DM3 pushes no unsolicited OSC, so read-after-write and `subscribe()` are weaker than SCP. Prefer `yamaha-dm3-scp` |
 | Yamaha | CL, QL | `MBC` over Audinate ConMon | Partial — a QL/CL is the *controlling* side of the captured protocol, and the same adapter addresses it. Driving a console's own **local** head amps was never observed on the wire, so it is untested and may not be supported at all |
 | Yamaha | DM7 | — | Not implemented — no public spec, and nothing confirms it shares DM3's OSC dialect or the R-series `MBC` block |
-| Yamaha | Rio, Tio (R-series) | `MBC` over Audinate ConMon | Implemented — gain, +48 V and metering, from a wire format [captured and proven on real hardware](docs/yamaha-ha-remote-over-dante.md). Never run against a device. |
+| Yamaha | Rio, Tio (R-series) | `MBC` over Audinate ConMon | Implemented — gain, +48 V and metering, from a wire format [captured and proven on real hardware](docs/yamaha-ha-remote-over-dante.md). Never run against a device. No plugin loads it yet, so `preamp-bridge` can't drive a Rio: see [docs/plugin-yamaha-mbc-sketch.md](docs/plugin-yamaha-mbc-sketch.md) |
 | *Any AES70 vendor* | Focusrite RedNet (MP8R and any unit with AES70 enabled); expected to reach Bosch/Dynacord OMNEO and d&b without new code | AES70/OCA (OCP.1 over TCP) | Implemented from the **published standard** — no reverse engineering, and not vendor-specific. The device's objects, classes and names are discovered at runtime, so there is no vendor ONo map to be wrong. Never run against any AES70 device; see the plugin's module comment for the two things to check first. |
 | Aphex | 1788A | Parametric MIDI SysEx | **Codec only, no transport.** The byte string is built and parsed from Aphex's published command table (gain, phantom, pad, polarity, mute, low cut, limiter — more of this project's model than any other device here). Nothing sends it yet: the table is the MIDI layer, and how SysEx reaches the unit's Ethernet port isn't documented. See the crate's module comment |
 | Sennheiser | evolution wireless G3 (EM 300/500 G3) | **binary WSM protocol** (UDP 8133) | **Validated end-to-end on a real EM 500 G3** (2026-09-15): a DM3's remote head-amp gain drove the receiver's analog **AF-out level** through the bridge, confirmed on the hardware. Kind `sennheiser-ewg3`, one channel, gain = AF-out (−24…+18 dB, 3 dB steps). Reverse-engineered from Wireless Systems Manager — **not** the documented ASCII protocol (TI 1254, UDP 53212), which this receiver does not answer. Close WSM before bridging: it holds the receiver's single write-master slot. See [docs/sennheiser-ewg3-bench-2026-09-15.md](docs/sennheiser-ewg3-bench-2026-09-15.md) |
@@ -158,7 +158,8 @@ borrowing something from IT and promising to bring it back. It matters for more 
 convenience. A receiver mounted on a console *unicasts* its telemetry to that console, so an
 ordinary switch port sees none of it, and there may not be a cable you can bridge into.
 Mirroring is the only way to capture that at all, and it's how the
-[Shure ACN work](docs/SHURE-ACN.md) was done.
+[Shure ACN work](https://github.com/stoatworks-labs/RFutils/blob/main/docs/SHURE-ACN.md) (written
+up in RFutils) was done.
 
 ## Gain compensation (gain lock)
 
@@ -205,9 +206,12 @@ crates/
 ├── plugin-yamaha-dm3/            # DM3 plugin, OSC transport (thin wrapper over LegacyPluginBridge)
 ├── plugin-yamaha-dm3-scp/        # DM3 plugin, SCP transport — the hardware-validated one (thin wrapper)
 ├── plugin-sennheiser-ewg3/       # Sennheiser G3 receiver plugin (thin wrapper over LegacyPluginBridge)
+├── plugin-aes70/                 # any AES70/OCA device (implements PluginAdapter directly)
+├── ocp1/                       # vendor-neutral AES70 controller (OCP.1 over TCP), used by plugin-aes70
 ├── preamp-adapter-osc/         # X32/Wing OSC wire-protocol logic, reused by the two plugins above
-├── preamp-adapter-ah/          # AHM/dLive wire-protocol logic, reused by the two plugins above
+├── preamp-adapter-ah/          # AHM/dLive wire-protocol logic, reused by the two plugins above, plus the DT168/DT164-W codec
 ├── preamp-adapter-yamaha/      # DM3 (OSC `Dm3Adapter` + SCP `Dm3ScpAdapter`) and R-series MBC wire logic
+├── preamp-adapter-aphex/       # Aphex 1788A SysEx codec (codec only, no transport)
 ├── preamp-adapter-sennheiser-ewg3/  # Sennheiser evolution-wireless G3 (AF-out as gain) over the binary WSM protocol, UDP 8133
 ├── preamp-web/                 # Patch-bay web UI + device/mapping management API (axum)
 └── preamp-cli/                 # `preamp-bridge` binary: discover, init, run, config, hot-reload
@@ -254,6 +258,7 @@ flowchart LR
     Dlive["libplugin_dlive_tcp"] -. abi_stable FFI .-> Reg
     Dm3["libplugin_yamaha_dm3"] -. abi_stable FFI .-> Reg
     Dm3Scp["libplugin_yamaha_dm3_scp"] -. abi_stable FFI .-> Reg
+    Ewg3["libplugin_sennheiser_ewg3"] -. abi_stable FFI .-> Reg
     Aes70["libplugin_aes70"] -. abi_stable FFI .-> Reg
     Router["Router (OCA objects)"] --> Web["Patch-bay web UI"]
 ```
@@ -280,14 +285,14 @@ build without touching this repo's own crates.
 
 ```sh
 cargo build --workspace
-cargo test --workspace     # 136 tests (both domains), all against mock devices - no hardware required
+cargo test --workspace     # 368 tests (both domains), all against mock devices - no hardware required
 
 # Browse Dante's mDNS advertisements for devices on the LAN
 cargo run --bin preamp-bridge -- discover
 
 # Auto-generate the [[device]] blocks of a bridge.toml by discovering
-# devices and probing each one against every implemented adapter's
-# identify() until one claims it. [[mapping]] entries are NOT generated
+# devices and probing each one against the identify() of the five kinds
+# init knows (see below) until one claims it. [[mapping]] entries are NOT generated
 # by default - add those by hand afterwards, or see --infer-mappings below.
 cargo run --bin preamp-bridge -- init --output bridge.toml
 
@@ -300,7 +305,9 @@ How sure `init` is about what it found depends on the protocol. X32-family desks
 confirm vendor *and* model (from documented `/info`/`/?` replies). AHM and dLive only confirm the
 protocol family, because their specs have no model-string query. DM3 is the weakest: its spec
 documents no identify query at all, so `init` reuses a scene-status request as a presence probe.
-Each adapter's `identify()` has the details.
+Each adapter's `identify()` has the details. Those five (X32, Wing, AHM, dLive and the OSC DM3)
+are the only kinds `init` probes for, so `yamaha-dm3-scp`, `sennheiser-ewg3` and `aes70` devices
+go into `bridge.toml` by hand.
 
 ### Auto-generating `[[mapping]]` entries (`--infer-mappings`)
 
@@ -367,14 +374,15 @@ whether a device is real or virtual.
 
 ## Preamp Control — Config format
 
-[`bridge.example.toml`](bridge.example.toml) is a worked example covering all four built-in device
-kinds. `kind` is an open string rather than a fixed list: a loaded plugin (see "Plugin
-Architecture" above) can register kinds beyond the ones this repo ships. The shape:
+[`bridge.example.toml`](bridge.example.toml) is a worked example. Its header describes all eight
+device kinds this repo ships, and its `[[device]]` blocks use five of them. `kind` is an open
+string rather than a fixed list: a loaded plugin (see "Plugin Architecture" above) can register
+kinds beyond the ones this repo ships. The shape:
 
 ```toml
 [[device]]
 id = "ahm-rack"
-kind = "ah-tcp"        # osc-x32 | osc-wing | ah-tcp | dlive-tcp | yamaha-dm3 | yamaha-dm3-scp
+kind = "ah-tcp"        # osc-x32 | osc-wing | ah-tcp | dlive-tcp | yamaha-dm3 | yamaha-dm3-scp | sennheiser-ewg3 | aes70
 address = "10.0.0.10"
 port = 51325            # optional, defaults to the protocol's standard port
 
@@ -407,10 +415,15 @@ defaults to the kind's documented channel count) and required for kinds that don
 | Lectrosonics | DSQD / D Squared, Duet | Ethernet control port | ⚠️ **Placeholder wire format** — scaffold only, NOT built from an authoritative spec; correct the bytes + set the real port before use. See adapter's module comment |
 | Shure | QLX-D **mounted on a console** | ANSI E1.17 ACN (SLPv2 + SDT/DMP over UDP) | Discovery + passive telemetry, reverse-engineered from real hardware. **Read-only, and needs a mirrored port** — the receiver unicasts its events to the console. Cannot open its own session; see the adapter's module comment |
 
-The Shure and Sennheiser adapters are built from official vendor specs (each adapter's module doc
-comment gives the document and URL) and have unit and integration tests against mocked sockets.
-They follow the same rule as the preamp adapters, no guessed wire framing, and likewise are **not
-yet validated against real hardware**.
+The Shure ULX-D/Axient and Sennheiser EW-DX adapters are built from official vendor specs (each
+adapter's module doc comment gives the document and URL) and have unit and integration tests
+against mocked sockets. The Shure QLX-D adapter isn't: no public spec covers a console-mounted
+receiver, so it's reverse-engineered from captures of a real QLXD4 on a Yamaha QL1 (the
+[write-up](https://github.com/stoatworks-labs/RFutils/blob/main/docs/SHURE-ACN.md) lives in
+RFutils), and its decoder is tested against frames from those captures. None of them guesses at
+wire framing, and none is **validated against a live receiver yet**. The QLX-D adapter also has
+no `mic-monitor` kind yet: for now its `decode_acn_capture` example, which replays a capture
+through the decoder, is the way to try it.
 
 The **Lectrosonics** adapter is the one exception to that rule, and it's flagged as such. There
 was no equivalent open protocol document, so its framing, port and field mappings are an
@@ -428,8 +441,9 @@ sequence, and shows what ends up in `MicState` for each vendor.
 [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md) is a different sort
 of document: a protocol note reverse-engineered from a capture of a real QL1 and Rio3224-D2. It
 shows that Yamaha head-amp control is a proprietary block tunnelled inside Dante ConMon rather
-than anything in Audinate's own control protocols. It's observation rather than validation (see
-its closing section).
+than anything in Audinate's own control protocols. Its closing section says what that proved on the
+hardware (the protocol, down to a gain write the Rio accepted) and what it didn't (any of this
+project's code).
 
 This domain is a different shape from preamp control. Telemetry is mostly reading: battery, RF
 level and audio level are monitoring only, and mute is the only write anyone's likely to want.
@@ -503,17 +517,17 @@ are in **[docs/UNSIGNED.md](docs/UNSIGNED.md)**.
 
 ## Roadmap / TODO
 
-- [ ] **Implement the Yamaha R-series adapter**, which is **ready to build now.** The wire format is captured, decoded and verified on a real Rio3224-D2 in [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md), including a reference implementation that reproduces a packet the stagebox accepted. Gain (int16 centi-dB) and phantom (uint8) map straight onto `PreampState`. It's the most shovel-ready item on the list.
-- [ ] **Map the remaining Yamaha subops:** eight 32-element arrays (`0x0722` subops `10`,`12`,`13`,`15`,`18`–`1b`) that almost certainly include pad, HPF and polarity, but were never seen populated. A ten-minute capture with the hardware resolves them, and the doc has the procedure.
+- [ ] **Wire the Yamaha R-series adapter into the bridge.** `MbcAdapter` is written: it speaks the wire format captured, decoded and verified on a real Rio3224-D2 in [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md), and its codec rebuilds the packet the stagebox accepted byte for byte. Nothing loads it yet, because it needs MAC addresses that a `[[device]]` entry has nowhere to put; [`docs/plugin-yamaha-mbc-sketch.md`](docs/plugin-yamaha-mbc-sketch.md) sets out the options, and points at the simpler SCP route R Remote uses. After that it needs a run against a real Rio.
+- [ ] **Map the remaining Yamaha subops:** `0x0722` subops `10`,`12`,`13`,`15` (single values) and `18`–`1b` (32-element arrays), which almost certainly include pad, HPF and polarity. Their shapes are known, but every value seen was a resting default that never moved, so nothing says which is which. A ten-minute capture with the hardware resolves them, and the doc has the procedure.
 - [ ] **Capture DT Preamp Control driving a real DT168 / DT164-W.** `crates/preamp-adapter-ah::dt` builds and parses the `AllenHth` ConMon vendor payload (gain/pad/+48 V for 16 preamps), but only from static RE, with no capture to anchor it. One capture of the app setting a gain settles every [OPEN] in [`docs/allenheath-dt-preamp-over-dante.md`](docs/allenheath-dt-preamp-over-dante.md): the ConMon envelope, the `u16` gain byte order, the UWORD→dB scale and the set-message field offsets. The same capture pointed at an **SQ** would show whether the console answers the same messages (its Dante card registers the same namespace).
 - [ ] **Give the Aphex 1788A codec a transport.** `crates/preamp-adapter-aphex` builds and parses the SysEx correctly, but nothing delivers it. There are two candidate paths: the documented MIDI layer, or the unit's Ethernet port, whose SysEx framing isn't published. The choice decides whether this becomes an ordinary socket adapter or the first device here that needs a MIDI backend (plus ALSA headers in Linux release CI). A capture, or ten minutes with a 1788A, settles it, along with whether "Mic Channel" counts from 0 or 1 and what a `20h` dump reply looks like.
-- [ ] **Validate the adapters against real hardware.** Every adapter is currently tested only against mock devices; no adapter has been run on live gear.
+- [ ] **Validate the rest of the adapters against real hardware.** The DM3 (SCP and OSC) and the Sennheiser G3 have run on real gear, on 2026-09-15; every other adapter is tested only against mock devices.
 - [ ] **Migrate the radio-mic domain onto plugins + OCA:** give it a `Router` in the process (it hasn't got one today, since it's pure monitoring), so telemetry mapping and parity with the web UI come for free.
-- [ ] **Ship plugin binaries in release CI.** `.github/workflows/release.yml` only builds the two host binaries today. Building and packaging all six `crates/plugin-*` `cdylib`s per platform is a proper expansion of the CI, and it isn't done yet.
+- [ ] **Ship plugin binaries in release CI.** `.github/workflows/release.yml` only builds the two host binaries today. Building and packaging all eight `crates/plugin-*` `cdylib`s per platform is a proper expansion of the CI, and it isn't done yet.
 - [ ] **Get a third-party head-amp capture:** a Focusrite MP8R or, better, a **Rupert Neve RMP-D8**, driven from a CL/QL/PM/DM7. Both can act as Yamaha head amps, which would reuse the `MBC` work wholesale, and Rupert Neve say the RMP-D8 appears to the console *as a native Rio*, which is the very device already captured. Nothing about either can be worked out from the QL1/Rio captures, since neither was on that network. [`docs/rednet-mp8r-capture-request.md`](docs/rednet-mp8r-capture-request.md) says what a three-minute capture would need to contain.
 - [ ] **Preamp device emulation:** make the bridge answer as a native device of a foreign brand, so a console's own preamp UI controls it directly (needs packet captures of a real console and device paired together).
 - [ ] **Telemetry emulation on a host console:** for example, putting ULX-D-shaped data on a Yamaha QL Wireless Monitor screen (the same problem, and it needs captures too).
-- [ ] **More preamp vendors:** Yamaha CL/QL/DM7 and Yamaha Rio/Tio, held up by missing public control specs or wire-format captures. (Allen & Heath Qu/SQ now has scaffolding via the DT `AllenHth` ConMon codec; see the capture item above.) Thanks to the plugin path (see below), these don't have to land in this repo to exist.
+- [ ] **More preamp vendors:** Yamaha DM7, and the CL/QL's own local head amps, held up by missing public control specs or wire-format captures. (Rio/Tio has its adapter; see the R-series item above. Allen & Heath Qu/SQ now has scaffolding via the DT `AllenHth` ConMon codec; see the capture item above.) Thanks to the plugin path (see below), these don't have to land in this repo to exist.
 - [ ] **Wing:** only its 8 built-in preamps so far. Extend it to remote stagebox preamps.
 
 ## Contributing a new adapter
@@ -521,14 +535,16 @@ are in **[docs/UNSIGNED.md](docs/UNSIGNED.md)**.
 There are two ways to add device support, and both come with the same rule: read the official (or
 community-authoritative) protocol doc and implement against it to the letter, with unit tests
 against the spec's own worked examples and an integration test through a mock socket. Never guess
-the wire framing. Several vendors here (preamp: Qu/SQ, CL/QL, Rio/Tio) are left unimplemented on
-purpose because no public spec covers the control in question, and filling those gaps needs a
-real spec or packet captures from real hardware rather than assumptions.
+the wire framing. Several devices here (preamp: Qu/SQ, DM7, and the CL/QL's own local head amps)
+are left unimplemented on purpose because no public spec covers the control in question, and
+filling those gaps needs a real spec or packet captures from real hardware rather than
+assumptions.
 
 **Rio/Tio isn't in that category any more.** The packet captures exist, the protocol's decoded,
-and a real Rio3224-D2 accepted a message built from the write-up (see
-[`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md)). It stays on the
-TODO list as work still to do rather than as a blocked unknown.
+a real Rio3224-D2 accepted a message built from the write-up (see
+[`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md)), and `MbcAdapter`
+implements it. It stays on the TODO list as work still to do (a plugin to load it, and a run
+against a real Rio) rather than as a blocked unknown.
 
 - **In-process** (lands in this repo): implement the relevant trait (`DeviceAdapter` for preamp
   control, `MicAdapter` for radio-mic telemetry) directly, compiled into the workspace. That's how
