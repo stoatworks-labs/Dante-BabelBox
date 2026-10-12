@@ -1,12 +1,14 @@
 # Dante-BabelBox
 
 > **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
-> (Anthropic), directed and reviewed by a human author. The adapters are built against official
-> or community-authoritative vendor protocol specs (each adapter's module doc comment names its
-> source), with one clearly flagged exception: the Lectrosonics mic adapter, whose wire format is
-> an unverified placeholder (see the Radio Mic Telemetry status table). Almost every adapter here
-> has only been tested against mock devices and is **not validated against real hardware**, so
-> check it over before you use it on live gear. There are two exceptions.
+> (Anthropic), directed and reviewed by a human author. Most adapters are built against official
+> or community-authoritative vendor protocol specs or a published standard (each adapter's module
+> doc comment names its source). The rest are flagged where they appear: the Yamaha R-series
+> (`MBC`), Sennheiser G3 (WSM), Shure QLX-D (ACN) and Allen & Heath DT work is reverse-engineered,
+> and the Lectrosonics mic adapter's wire format is an unverified placeholder (see the Radio Mic
+> Telemetry status table). Almost every adapter here has only been tested against mock devices
+> and is **not validated against real hardware**, so check it over before you use it on live
+> gear. There are three exceptions.
 >
 > **First, the Yamaha DM3 is fully validated on hardware.** On 2026-09-15, the **SCP adapter**
 > (`Dm3ScpAdapter`, kind `yamaha-dm3-scp`, TCP 49280) had every path proven on a real DM3
@@ -18,7 +20,13 @@
 > why SCP got built. Full findings:
 > [`docs/yamaha-dm3-bench-2026-09-15.md`](docs/yamaha-dm3-bench-2026-09-15.md).
 >
-> **Second, and it's a big one.** The Yamaha R-series HA protocol was captured from a real QL1 +
+> **Second, the Sennheiser G3.** The same day, the `sennheiser-ewg3` adapter drove a real EM 500
+> G3's AF-out level from the DM3's remote head-amp gain, through the bridge, end to end. Its
+> protocol is reverse-engineered from Wireless Systems Manager, and WSM has to be closed first,
+> since it holds the receiver's only write slot. Full findings:
+> [`docs/sennheiser-ewg3-bench-2026-09-15.md`](docs/sennheiser-ewg3-bench-2026-09-15.md).
+>
+> **Third, and it's a big one.** The Yamaha R-series HA protocol was captured from a real QL1 +
 > Rio3224-D2, decoded, written up, then **rebuilt from the write-up and sent back, and the
 > stagebox accepted it and changed its gain** (see
 > [`docs/yamaha-ha-remote-over-dante.md`](docs/yamaha-ha-remote-over-dante.md)). What that proves
