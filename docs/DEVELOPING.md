@@ -18,9 +18,8 @@ cargo build
 cargo test
 cargo clippy --all-targets --all-features
 
-cargo run -p preamp-cli      # preamp-bridge
-cargo run -p mic-cli         # mic-monitor
-cargo run -p preamp-web
+cargo run --bin preamp-bridge   # crates/preamp-cli; `run` also serves the preamp-web UI
+cargo run --bin mic-monitor     # crates/mic-cli
 ```
 
 ---
@@ -99,8 +98,10 @@ collapsing them into a generic 400 loses the operator's ability to tell "wrong a
 
 ### The honest limit
 
-**No adapter has ever been validated against real hardware** — only against mocks in the test
-suite. That's the single most valuable thing anyone could change, and the
+**Almost no adapter has been validated against real hardware** — only against mocks in the test
+suite. The exceptions are the DM3 (SCP and OSC) and the Sennheiser G3, which ran on real gear on
+2026-09-15 ([DM3](yamaha-dm3-bench-2026-09-15.md), [G3](sennheiser-ewg3-bench-2026-09-15.md)).
+Running the rest on hardware is the single most valuable thing anyone could change, and the
 [capture guides](capture-guide-macos.md) exist to support exactly that work: they explain how
 to capture a real console-to-stagebox conversation with Wireshark, per OS.
 
@@ -112,7 +113,7 @@ The separate **`Dante-BabelBox-notes`** repo (private) holds further research ma
 
 The patch-bay web UI has **no auth and no TLS**, and binds all interfaces by default. That is
 a deliberate choice with a stated model — *a hardware router's control port on a trusted
-operations network*. `--bind 127.0.0.1:PORT` restricts it to the local machine.
+operations network*. `--web-bind 127.0.0.1:PORT` restricts it to the local machine.
 
 If you change the default, change the README and `USAGE.md` too; operators rely on knowing
 which it is.

@@ -80,8 +80,9 @@ crates/
    mDNS advertisements to show you what Dante devices exist on the LAN.
    Dante's discovery only confirms an address exists; it carries no
    vendor/model/protocol information, so `init` (below) probes each
-   found address against every implemented adapter's `identify()` to
-   figure out what it actually is. A second, distinct protocol
+   found address against the `identify()` of the five kinds it knows
+   (X32, Wing, AHM, dLive and the OSC DM3) to figure out what it
+   actually is. A second, distinct protocol
    (`crates/discovery/src/dante_control.rs`) can also observe Dante's
    own audio-routing/subscription state, which `init --infer-mappings`
    uses to guess `[[mapping]]` entries from live patching.
@@ -94,7 +95,7 @@ crates/
 
 ```sh
 cargo build --workspace
-cargo test --workspace     # 136 tests (both preamp-bridge and mic-monitor), no hardware required
+cargo test --workspace     # 368 tests (both preamp-bridge and mic-monitor), no hardware required
 ```
 
 ## Commands
@@ -112,9 +113,11 @@ cargo run --bin preamp-bridge -- discover --timeout-secs 10   # default is 5
 
 ### `preamp-bridge init`
 
-Discovers devices via mDNS and probes each address against every
-implemented adapter's `identify()` until one claims it, then writes the
-`[[device]]` blocks of a `bridge.toml` for you.
+Discovers devices via mDNS and probes each address against the
+`identify()` of five kinds (X32, Wing, AHM, dLive and the OSC DM3) until
+one claims it, then writes the `[[device]]` blocks of a `bridge.toml` for
+you. It doesn't probe for `yamaha-dm3-scp`, `sennheiser-ewg3` or `aes70`,
+so add those by hand.
 
 ```sh
 cargo run --bin preamp-bridge -- init --output bridge.toml
@@ -196,10 +199,11 @@ address = "10.0.0.10"  # IP on the Dante/control network
 port = 51325           # optional - each kind has a sensible default
 ```
 
-Built-in `kind` values. `osc-x32` ships as a loaded plugin by default
-(see the `run` section above); the rest are still compiled in directly.
-`kind` itself is an open string - a plugin dropped in `--plugins-dir` can
-register any further kind id it declares:
+The `kind` values this repo ships. Every one of them is a loaded plugin
+(see the `run` section above); only the `ah-midi` and `yamaha`
+placeholders below are compiled in. `kind` itself is an open string - a
+plugin dropped in `--plugins-dir` can register any further kind id it
+declares:
 
 | `kind` | Vendor / device | Protocol | Default port |
 |---|---|---|---|
@@ -208,11 +212,15 @@ register any further kind id it declares:
 | `ah-tcp` | Allen & Heath AHM-series processors | NRPN-over-TCP | 51325 |
 | `dlive-tcp` | Allen & Heath dLive MixRack | MIDI-over-TCP | 51325 |
 | `yamaha-dm3` | Yamaha DM3 / DM3S | OSC/UDP | 49900 |
+| `yamaha-dm3-scp` | Yamaha DM3 / DM3S (the recommended DM3 kind) | SCP/TCP | 49280 |
+| `sennheiser-ewg3` | Sennheiser EM 300/500 G3 receiver (gain = AF-out level) | binary WSM/UDP | 8133, fixed |
+| `aes70` | Any AES70 device, e.g. Focusrite RedNet | OCP.1/TCP | 65000 (convention only) |
 
 `ah-midi` (Qu/SQ) and `yamaha` (CL/QL/DM7, Rio/Tio) are recognized by the
 config parser but rejected at startup with an explanation — no public
-protocol spec documents preamp control for those, so nothing is
-implemented for them yet (see README's status table).
+protocol spec documents preamp control for those. Rio/Tio has since been
+captured and `MbcAdapter` implements it, but no plugin loads it yet, so
+the `yamaha` kind still refuses to start (see README's status table).
 
 A device can also be declared `virtual = true` — a placeholder for the
 not-yet-built device-emulation layer, with no `address` (there's nothing
@@ -388,9 +396,9 @@ Copy [`mics.example.toml`](mics.example.toml) as a starting point:
 ```toml
 [[mic]]
 id = "ulxd-1"          # your own label
-kind = "shure-ulxd"     # shure-ulxd | shure-axient | sennheiser-ewdx
+kind = "shure-ulxd"     # shure-ulxd | shure-axient | sennheiser-ewdx | lectrosonics-dsqd (placeholder wire format)
 address = "10.0.0.30"   # IP on the control network
-port = 2202              # optional - defaults to 2202 (Shure) or 45 (Sennheiser)
+port = 2202              # optional - defaults to 2202 (Shure), 45 (Sennheiser) or 4992 (Lectrosonics placeholder)
 ```
 
 No `[[mapping]]` section — nothing to route between mics.

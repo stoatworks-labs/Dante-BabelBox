@@ -42,8 +42,10 @@ be, for the preamp domain specifically — `PreampState{gain_db, phantom,
 pad}` — this OCA model replaced it precisely so a plugin isn't forced
 into that preamp-shaped mold).
 
-> **Not a wire protocol.** This is an *internal* model only — there's no
-> OCP.1 (real AES70) traffic anywhere in this project today. The name and
+> **Not a wire protocol.** This is an *internal* model only. The one place
+> real OCP.1 (AES70) traffic happens is the `aes70` plugin, through
+> [`crates/ocp1`](../crates/ocp1), and that's a device protocol like any
+> other, nothing to do with this model. The name and
 > class taxonomy are borrowed from the AES70/OCA standard because it's a
 > genuinely good fit (confirmed against a real AES70 implementation, see
 > [`crates/oca/src/lib.rs`](../crates/oca/src/lib.rs)'s doc comment) — not

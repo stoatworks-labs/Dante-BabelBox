@@ -61,8 +61,9 @@ TCP to real devices. Only `plugin-aes70` uses it.
 These are in the README as user-facing warnings and must not be quietly softened:
 
 **Almost no adapter has been validated against real hardware** — every adapter is tested
-against mock devices in the test suite, and only **one** has also been run against a real
-device (the DM3, below). Say "almost no adapter has been validated", not "nothing has been
+against mock devices in the test suite, and only the DM3 (both transports, below) and the
+Sennheiser G3 have also been run against real devices
+([`docs/sennheiser-ewg3-bench-2026-09-15.md`](docs/sennheiser-ewg3-bench-2026-09-15.md)). Say "almost no adapter has been validated", not "nothing has been
 validated" — the distinction now matters twice over, see below.
 
 **The Yamaha DM3 is a fully hardware-validated target** (V3.00, 2026-09-15) — the first and
@@ -84,8 +85,9 @@ QL1 + Rio3224-D2, decoded, written up as
 from that document and transmitted — the stagebox accepted it and changed its gain. Keep the
 line sharp when editing: **the protocol is verified, the code is not.** The write came from a
 standalone Python script; `preamp-adapter-yamaha` covers the DM3 (OSC `Dm3Adapter` and the
-hardware-validated SCP `Dm3ScpAdapter`) but has no
-Rio support at all. Anyone implementing Rio HA is working from evidence, not guesswork — that
+hardware-validated SCP `Dm3ScpAdapter`) and has the Rio's `MbcAdapter` (`src/mbc/`), which
+rebuilds the accepted frame byte for byte but has never run against a device, and no plugin
+loads it. Anyone implementing Rio HA is working from evidence, not guesswork — that
 is the claim, and it should not be inflated into "the Yamaha adapter works".
 
 **The Lectrosonics mic adapter's wire format is an unverified placeholder.** Every other
@@ -147,9 +149,8 @@ space, separate from the preamp `channel` the other objects use.
 cargo build
 cargo test
 cargo clippy --all-targets --all-features
-cargo run -p preamp-cli
-cargo run -p mic-cli
-cargo run -p preamp-web
+cargo run --bin preamp-bridge   # crates/preamp-cli; `run` also serves the preamp-web UI
+cargo run --bin mic-monitor     # crates/mic-cli
 ```
 
 `bridge.example.toml` is the configuration template.

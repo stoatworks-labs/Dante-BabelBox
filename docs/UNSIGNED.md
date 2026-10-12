@@ -83,7 +83,7 @@ protection → Allow an app through firewall → Change settings**, find the ent
 Or from an elevated PowerShell:
 
 ```powershell
-New-NetFirewallRule -DisplayName "Dante-BabelBox" -Direction Inbound -Program "C:\Path\To\Dante-BabelBox.exe" -Action Allow -Profile Private,Domain
+New-NetFirewallRule -DisplayName "Dante-BabelBox" -Direction Inbound -Program "C:\Path\To\preamp-bridge.exe" -Action Allow -Profile Private,Domain
 ```
 
 To remove a bad rule and get the prompt back on next launch:
@@ -101,10 +101,10 @@ if you run a firewall, open the ports yourself (`ufw allow <port>/tcp`).
 
 ## Linux
 
-No signing gate. Make the binary executable if you took the tarball:
+No signing gate. Make the binaries executable if you took the tarball:
 
 ```sh
-chmod +x ./dante-babelbox
+chmod +x ./preamp-bridge ./mic-monitor
 ```
 
 The `.deb` and `.rpm` packages are unsigned too, so your package manager may object:

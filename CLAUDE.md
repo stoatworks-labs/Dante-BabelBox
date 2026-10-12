@@ -6,9 +6,9 @@ Cross-vendor Dante preamp + mic bridge (Rust). Normalizes preamp control and wir
 - Build: `cargo build` (workspace)
 - Test: `cargo test`
 - Lint: `cargo clippy --all-targets --all-features`
-- Run preamp CLI: `cargo run -p preamp-cli`
-- Run mic CLI: `cargo run -p mic-cli`
-- Preamp web UI: `cargo run -p preamp-web`
+- Run preamp CLI: `cargo run --bin preamp-bridge` (package `dante-babelbox-preamp-cli`)
+- Run mic CLI: `cargo run --bin mic-monitor` (package `dante-babelbox-mic-cli`)
+- Preamp web UI: served by `preamp-bridge run`; `preamp-web` is a library with no binary
 
 ## Layout (crates/)
 - `core` / `mic-core` — shared traits & models; `core::gain_lock` is gain compensation across desks (docs/GAIN-LOCK.md, invariants in AGENTS.md §4a)

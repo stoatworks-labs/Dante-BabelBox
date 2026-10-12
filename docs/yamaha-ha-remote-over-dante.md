@@ -14,9 +14,10 @@
 > guess. That is a materially different position from every other adapter in
 > this workspace.
 >
-> **What that does *not* mean:** no Rust code in this repo has driven real
-> hardware. The write was performed by a standalone Python script. There is
-> still no Rio adapter. See §11 for the exact line between the two.
+> **What that does *not* mean:** no Rust code in this repo has driven a Rio.
+> The write was performed by a standalone Python script. The Rio adapter
+> (`MbcAdapter`) now exists, but it has never run against a device and no
+> plugin loads it yet. See §11 for the exact line between the two.
 
 *Read the confidence markers throughout:* some findings are **confirmed** by
 watching values change under a known physical action, some are **inferred**, and
@@ -408,8 +409,9 @@ transmission — the ability to *set* gain on a real Rio3224-D2.
 **Not validated:** any of this from inside Dante-BabelBox. The write was
 performed by a standalone Python script — which is **no longer on disk**; only
 the reference implementation in §10 and the accepted packets themselves
-survive. No crate in this workspace has yet driven real hardware, so the
-README's honesty warning stands.
+survive. No crate in this workspace has yet driven a Rio (the DM3 and G3
+adapters ran on real gear on 2026-09-15, over different protocols), so
+the README's honesty warning stands.
 
 **What exists now:** `preamp-adapter-yamaha`'s `mbc` module implements this
 document. Its codec is unit-tested against frames lifted straight out of the
