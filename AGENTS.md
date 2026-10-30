@@ -157,7 +157,7 @@ cargo run --bin mic-monitor     # crates/mic-cli
 
 ## 6. Conventions
 
-- Multi-platform release CI; cross-compile macOS x86_64 on `macos-14` — never `macos-13`.
+- Multi-platform release CI; cross-compile macOS x86_64 on `macos-15` — never `macos-13`.
 - Public repo. "Commit" means commit **and** push.
 
 ## 7. Related work

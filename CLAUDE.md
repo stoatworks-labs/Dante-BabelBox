@@ -34,7 +34,7 @@ Cross-vendor Dante preamp + mic bridge (Rust). Normalizes preamp control and wir
 
 ## Notes
 - Adding a vendor = new `*-adapter-*` crate implementing the core trait; don't leak vendor specifics into `core`.
-- Multi-platform release CI; cross-compile macOS x86_64 on macos-14 (never macos-13).
+- Multi-platform release CI; cross-compile macOS x86_64 on macos-15 (never macos-13).
 - Public repo. Ships user-facing AI disclaimer. "Commit" = commit **and** push.
 
 ## Diagnostics

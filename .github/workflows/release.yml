@@ -30,7 +30,7 @@ jobs:
           # exists only on this row. universal-apple-darwin is a Tauri bundling
           # target, not a cargo one, so unlike the launcher repos this cannot be
           # expressed by changing `target` — cargo would reject it.
-          - { name: macos-universal, os: macos-14,         target: aarch64-apple-darwin, target2: x86_64-apple-darwin }
+          - { name: macos-universal, os: macos-15,         target: aarch64-apple-darwin, target2: x86_64-apple-darwin }
     steps:
       - uses: actions/checkout@v7
 
