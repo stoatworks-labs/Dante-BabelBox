@@ -43,6 +43,8 @@ A control bridge for Dante rigs with kit from more than one manufacturer. It doe
    across vendors, whether or not the receiver even has a Dante audio option fitted (the "Radio
    Mic Telemetry" sections below explain why that doesn't matter here).
 
+The [project page](https://stoatworks-labs.com/software/dante-babelbox/) has the downloads, the [user guide](https://stoatworks-labs.com/software/dante-babelbox/guide/) and the video.
+
 [![Dante-BabelBox: two vendor protocols recovered from packet captures](docs/video-thumb.png)](https://www.youtube.com/watch?v=Tx7hntcaOTw)
 
 *56 seconds. Every line of terminal output is the actual decoder: the two capture-replay tools in
