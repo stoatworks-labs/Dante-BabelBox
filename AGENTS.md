@@ -35,6 +35,7 @@ crates/
   core/          Shared traits and models for preamps
   mic-core/      Shared traits and models for radio mics
   discovery/     Dante device discovery
+  emulation/     A virtual Dante device's control plane (mDNS, ARC, ConMon) - see §4b
   oca/           The internal object model (Ono/OcaClass/OcaValue/OcaObject)
   oca-plugin-abi/ The FFI-safe host<->plugin contract (abi_stable)
   ocp1/          A real AES70-3 (OCP.1) controller - see the note below
@@ -90,6 +91,10 @@ rebuilds the accepted frame byte for byte but has never run against a device, an
 loads it. Anyone implementing Rio HA is working from evidence, not guesswork — that
 is the claim, and it should not be inflated into "the Yamaha adapter works".
 
+**The emulated Rio (`yamaha-rio-emulated`) has never met a console.** Its answers are checked
+against a capture of a real Rio answering a real QL1, byte for byte. That is the whole claim. See
+§4b, and don't let "237 of 237" drift into "works with a QL" in any README or release note.
+
 **The Lectrosonics mic adapter's wire format is an unverified placeholder.** Every other
 adapter is built against official or community-authoritative vendor protocol specs — and each
 adapter's module doc comment cites its source. Lectrosonics is the flagged exception. If you
@@ -142,6 +147,30 @@ misbehaves mid-show rather than in a test:
 
 Trim objects are role `"In N Trim"` at `channel_scheme::trim_ono(N)`. That's an input-channel
 space, separate from the preamp `channel` the other objects use.
+
+## 4b. Emulation: the bridge as the device
+
+`yamaha-rio-emulated` is the one kind where the bridge is not a client. It puts a virtual
+Rio3224-D2 on the Dante network for a Yamaha console to mount and control. Read
+[`docs/dante-emulation.md`](docs/dante-emulation.md) before touching it. The rules:
+
+- **The split is the architectural rule again.** `crates/emulation` is a Dante device and knows
+  no vendor: mDNS, ARC, ConMon registration and status. A console's control protocol is a state
+  machine in that vendor's adapter crate (`preamp-adapter-yamaha::mbc::device`) riding on
+  `VirtualDevice::vendor()`. Do not put `MBC`, or anything Yamaha, in `crates/emulation`.
+- **It answers from a capture, and the tests hold it to the capture.** Every reply format was
+  read off a real Rio3224-D2 answering a real QL1. The unit tests carry those frames, and two
+  replay examples (`replay_mbc_device`, `replay_capture`) put the console's whole conversation
+  to the emulator and compare byte for byte. If you change a reply, run both against the
+  capture in the private `dante-captures` repo. A field whose meaning is unknown is sent as
+  captured and says so in a comment. Don't name it, and don't "tidy" it.
+- **The honest claim is narrow, keep it that way:** "its answers are the real Rio's; no console
+  has been put in front of it." Not "works with a QL". The head-amp layer matches on 237 of 237
+  messages; the Dante layer matches wherever audio is not involved. It carries no audio.
+- **It never answers what the Rio did not answer.** An unknown opcode, a read past an array's
+  end, a block for another device: silence, plus a log line. A Rio never NAKs.
+- **On pairing a console writes all 32 channels.** Those writes are relayed. Anything that
+  changes how they are reported changes what reaches a mapped preamp's phantom power.
 
 ## 5. Commands
 

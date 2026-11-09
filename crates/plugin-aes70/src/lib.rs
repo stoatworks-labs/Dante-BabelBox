@@ -320,6 +320,7 @@ mod tests {
             address: RSome(addr.ip().to_string().into()),
             port: RSome(addr.port()),
             channels: RNone,
+            options: RVec::new(),
         }
     }
 
@@ -344,6 +345,7 @@ mod tests {
             address: RNone,
             port: RNone,
             channels: RNone,
+            options: RVec::new(),
         };
         assert!(matches!(create_adapter(config), RResult::RErr(_)));
     }
@@ -355,6 +357,7 @@ mod tests {
             address: RSome("not-an-ip".into()),
             port: RNone,
             channels: RNone,
+            options: RVec::new(),
         };
         assert!(matches!(create_adapter(config), RResult::RErr(_)));
     }

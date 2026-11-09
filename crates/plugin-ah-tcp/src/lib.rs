@@ -80,6 +80,7 @@ mod tests {
             address: abi_stable::std_types::RNone,
             port: abi_stable::std_types::RNone,
             channels: abi_stable::std_types::RNone,
+            options: RVec::new(),
         };
         assert!(matches!(create_adapter(config), RResult::RErr(_)));
     }
@@ -115,6 +116,7 @@ mod tests {
             address: abi_stable::std_types::RSome(addr.ip().to_string().into()),
             port: abi_stable::std_types::RSome(addr.port()),
             channels: abi_stable::std_types::RSome(64),
+            options: RVec::new(),
         };
         let RResult::ROk(mut adapter) = create_adapter(config) else {
             panic!("create_adapter failed")

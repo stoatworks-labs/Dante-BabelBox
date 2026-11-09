@@ -12,6 +12,12 @@
 //! a device. DM7 is still unimplemented: whether it shares any of this is
 //! unconfirmed.
 //!
+//! [`mbc::emulated::EmulatedRioAdapter`] is the other end of that same
+//! protocol: it *is* a Rio, on the network only, for a console to control.
+//! Its answers are a real Rio3224-D2's, byte for byte, replayed from the
+//! same capture; it has never been run against a console either. See
+//! `docs/dante-emulation.md`.
+//!
 //! CORRECTION to what this file previously claimed: R-series HA control is
 //! *not* the legacy AD8HR MIDI protocol. A native QL1 <-> Rio3224-D2
 //! pairing carries gain and phantom in a Yamaha-proprietary binary block
@@ -46,4 +52,5 @@ pub mod mbc;
 
 pub use dm3::Dm3Adapter;
 pub use dm3_scp::{Dm3ScpAdapter, SCP_PORT};
+pub use mbc::emulated::{EmulatedRioAdapter, EmulatedRioConfig, RSeriesModel};
 pub use mbc::{MbcAdapter, MbcIdentity};

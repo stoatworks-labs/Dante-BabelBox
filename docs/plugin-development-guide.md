@@ -370,6 +370,12 @@ kind ids are just strings now, open-ended, declared by whoever registers
 them (a plugin, or one of the host's own statically-registered legacy
 adapters).
 
+The `RDeviceConfig` handed to `create_adapter` carries the device's `id`,
+`address`, `port` and `channels`, plus `options`: every other key from its
+`[[device]]` table, with each value rendered as a string. `unit_id = 5` in
+`bridge.toml` is read with `config.option("unit_id")` and arrives as `"5"`;
+a key your plugin doesn't know is ignored.
+
 `TD_Opaque` (vs. `TD_CanDowncast`) means the resulting trait object can't
 be downcast back to your concrete type on the host side — correct here,
 since the host never needs to, and it's the simpler/safer choice.

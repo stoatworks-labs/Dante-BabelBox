@@ -369,6 +369,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante-babelbox-emulation"
+version = "0.5.0"
+dependencies = [
+ "dante-babelbox-discovery",
+ "mdns-sd",
+ "socket2",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "dante-babelbox-mic-adapter-lectrosonics"
 version = "0.5.0"
 dependencies = [
@@ -570,6 +583,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante-babelbox-plugin-yamaha-rio-emulated"
+version = "0.5.0"
+dependencies = [
+ "abi_stable",
+ "dante-babelbox-core",
+ "dante-babelbox-emulation",
+ "dante-babelbox-oca-plugin-abi",
+ "dante-babelbox-preamp-adapter-yamaha",
+]
+
+[[package]]
 name = "dante-babelbox-preamp-adapter-ah"
 version = "0.5.0"
 dependencies = [
@@ -630,11 +654,13 @@ version = "0.5.0"
 dependencies = [
  "async-trait",
  "dante-babelbox-core",
+ "dante-babelbox-emulation",
  "rosc",
  "socket2",
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

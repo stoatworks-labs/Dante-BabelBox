@@ -488,6 +488,7 @@ mod tests {
             address: abi_stable::std_types::RSome("127.0.0.1".into()),
             port: abi_stable::std_types::RSome(0),
             channels: abi_stable::std_types::RNone,
+            options: RVec::new(),
         };
         let adapter = root.create_adapter()(config);
         assert!(matches!(adapter, RResult::ROk(_)));

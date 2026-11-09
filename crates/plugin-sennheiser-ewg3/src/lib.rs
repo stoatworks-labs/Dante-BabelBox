@@ -81,6 +81,7 @@ mod tests {
             address: abi_stable::std_types::RNone,
             port: abi_stable::std_types::RNone,
             channels: abi_stable::std_types::RNone,
+            options: RVec::new(),
         };
         assert!(matches!(create_adapter(config), RResult::RErr(_)));
     }
@@ -92,6 +93,7 @@ mod tests {
             address: abi_stable::std_types::RSome("not-an-ip".into()),
             port: abi_stable::std_types::RNone,
             channels: abi_stable::std_types::RNone,
+            options: RVec::new(),
         };
         assert!(matches!(create_adapter(config), RResult::RErr(_)));
     }
@@ -103,6 +105,7 @@ mod tests {
             address: abi_stable::std_types::RSome("192.168.0.101".into()),
             port: abi_stable::std_types::RNone,
             channels: abi_stable::std_types::RNone,
+            options: RVec::new(),
         };
         assert!(matches!(create_adapter(config), RResult::ROk(_)));
     }

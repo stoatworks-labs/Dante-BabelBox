@@ -28,6 +28,18 @@
 #                receiver's IP (front-panel Advanced > IP-Address); `port`
 #                is ignored (fixed 8133). CLOSE Wireless Systems Manager
 #                first - it holds the receiver's single write-master slot.
+#   "yamaha-rio-emulated" An EMULATED Yamaha Rio3224-D2: the bridge is
+#                the device. A CL/QL console sees a Rio, mounts it by
+#                unit id and drives its head amps; each move is mapped
+#                on like any other change. `address` is THIS machine's
+#                own address on the Dante network (where the Rio will
+#                appear), `unit_id` is required, `port` is ignored.
+#                Built from a capture of a real QL1 and Rio; never run
+#                against a console, and it carries no audio. On pairing
+#                the console writes its own gain and +48 V to all 32
+#                channels and the bridge relays them - read
+#                docs/dante-emulation.md before mapping it to anything
+#                with phantom power.
 #   "aes70"      Any device speaking the AES70/OCA standard - written
 #                against Focusrite RedNet (MP8R and any RedNet unit with
 #                AES70 enabled), but not vendor-specific: the device's
@@ -40,7 +52,9 @@
 #                accepted as an alias for older config files.)
 #
 # "ah-midi" (Qu/SQ) and "yamaha" (CL/QL/DM7, Rio/Tio) are not implemented
-# yet - see the project task list for why. `kind` is an open string, not
+# yet - see the project task list for why. A kind can take settings of its
+# own: any other key in a [[device]] table (number, string or boolean) is
+# passed to that device's plugin. `kind` is an open string, not
 # a fixed list - dropping a plugin `.so`/`.dylib`/`.dll` into the
 # bridge's --plugins-dir (see README's "Plugin Architecture" section and
 # docs/plugin-development-guide.md) registers additional kinds without
@@ -106,6 +120,21 @@ bidirectional = true
 #
 # [[mapping]]
 # from = { device = "dm3-foh", channel = 2 }
+# to   = { device = "digiface", channel = 1 }
+# gain_offset_db = -60.0
+
+# An emulated Rio for a Yamaha console to control, driving the Digiface
+# output above from the console's own head-amp gain. Uncomment both, and
+# set `address` to this machine's address on the Dante network:
+#
+# [[device]]
+# id = "virtual-rio"
+# kind = "yamaha-rio-emulated"
+# address = "169.254.10.20"
+# unit_id = 5               # the console mounts it as Y005; must be free
+#
+# [[mapping]]
+# from = { device = "virtual-rio", channel = 3 }
 # to   = { device = "digiface", channel = 1 }
 # gain_offset_db = -60.0
 

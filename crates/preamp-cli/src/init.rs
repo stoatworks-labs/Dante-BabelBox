@@ -148,6 +148,7 @@ pub async fn probe_and_build(ips: Vec<IpAddr>, per_attempt_timeout: Duration) ->
             port: Some(port),
             is_virtual: false,
             channels: None,
+            options: Default::default(),
         });
     }
 
@@ -397,6 +398,7 @@ mod tests {
                     port: Some(DEFAULT_WING_PORT),
                     is_virtual: false,
                     channels: None,
+                    options: Default::default(),
                 },
                 DeviceConfig {
                     id: "dlive-tcp-15".to_string(),
@@ -405,6 +407,7 @@ mod tests {
                     port: Some(DEFAULT_DLIVE_PORT),
                     is_virtual: false,
                     channels: None,
+                    options: Default::default(),
                 },
             ],
             mappings: Vec::new(),
@@ -444,6 +447,7 @@ mod tests {
                     port: Some(DEFAULT_DLIVE_PORT),
                     is_virtual: false,
                     channels: None,
+                    options: Default::default(),
                 },
                 DeviceConfig {
                     id: "console".to_string(),
@@ -452,6 +456,7 @@ mod tests {
                     port: Some(DEFAULT_X32_PORT),
                     is_virtual: false,
                     channels: None,
+                    options: Default::default(),
                 },
             ],
             mappings: vec![ChannelMapping {
@@ -584,6 +589,7 @@ mod tests {
                 port: None,
                 is_virtual: false,
                 channels: None,
+                options: Default::default(),
             },
             DeviceConfig {
                 id: "console".to_string(),
@@ -592,6 +598,7 @@ mod tests {
                 port: None,
                 is_virtual: false,
                 channels: None,
+                options: Default::default(),
             },
         ];
         let mut arc_ports = HashMap::new();
@@ -662,6 +669,7 @@ mod tests {
             port: None,
             is_virtual: false,
             channels: None,
+            options: Default::default(),
         }];
         let mut arc_ports = HashMap::new();
         arc_ports.insert(console_addr.ip(), console_addr.port());

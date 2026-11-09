@@ -208,3 +208,40 @@ trim. Followers so far: X32 (`/ch/NN/preamp/trim`) and Wing (`/ch/N/in/set/trim`
   refused ("too many fields", expected 11, found 10). Checked by building one from origin/main.
   The first daemon test run after a rebuild can also time out at 2 s while macOS scans the fresh
   dylibs; a rerun passes.
+
+**2026-11-09 — Device emulation exists: an emulated Rio3224-D2 (`yamaha-rio-emulated`).**
+The "discussed future direction" near the top of this file is built, for one device. Guide:
+`docs/dante-emulation.md`. It came out of re-reading the QL1 / Rio capture from the *Rio's*
+side, which nobody had done, and that turned up several things worth knowing on their own:
+
+- **The whole head-amp handshake is on the vendor multicast group** (224.0.0.232:8705), and it
+  is four moves keyed by the low nibble of the flags byte: `01` read, `00` write, `02` the
+  `0731` arrays, `03` start metering. The device answers with the same nibble plus `0x20`.
+  The console finds devices by broadcasting a read of `071f/06` every six seconds.
+- **A read reply lies about its length on purpose.** The device sends the request's `len`
+  (10) back and appends the data. This was already known as a decoding trap; it is now also a
+  rule for *sending*, since that is the only form a console has been seen to accept.
+- **`blocks_in_conmon_payload` had been dropping every block after the first in a packet.**
+  The envelope carries a block count at offset 36 and a length before *each* block; the
+  decoder read only the first length. Nothing it reported was wrong, but the capture holds
+  3 939 blocks, not 3 889, and 117 read requests, not 96. Fixed, with the Rio's two-block
+  power-up packet as the test.
+- **ARC from a console is protocol `0x2801`, not `0x27ff`.** Same record shapes, different
+  version word; the device echoes whichever it was asked in. Dante Controller uses `0x2808`
+  with opcodes nothing here answers yet (`0x2002`, `0x2400`, `0x3400`, `0x3600`).
+- **The console sets the device's sample encoding** (24 to 32 bit) with a ConMon message on
+  the control port, type `0x0083`, the same type it uses to *query* encoding. A query's body
+  opens `000f4240`; the write's opens with zeroes.
+- **`#[serde(flatten)]` options on `DeviceConfig`.** Extra `[[device]]` keys now reach the
+  plugin (`RDeviceConfig::option`). A non-scalar extra key is a config error, where it used to
+  be silently dropped.
+
+What was *not* done, so nobody assumes it: no console has seen the emulated Rio. The replay
+tools prove its answers match a real Rio's (237 of 237 head-amp messages; ARC, registration
+and status wherever audio isn't involved). They cannot prove the QL1 asked everything a
+console will ask, or what a console does when a subscription never connects. Also not rebuilt:
+`docs/USER-GUIDE.pdf`, which still lacks the new kind.
+
+The daemon now deregisters every device on Ctrl-C. That is what withdraws an emulated device's
+mDNS records (checked: `dns-sd -B` shows the `Rmv` within a second); before, adapters were just
+dropped with the process.

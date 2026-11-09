@@ -13,6 +13,10 @@ Cross-vendor Dante preamp + mic bridge (Rust). Normalizes preamp control and wir
 ## Layout (crates/)
 - `core` / `mic-core` — shared traits & models; `core::gain_lock` is gain compensation across desks (docs/GAIN-LOCK.md, invariants in AGENTS.md §4a)
 - `discovery` — Dante device discovery
+- `emulation` — a virtual Dante device's control plane (mDNS, ARC, ConMon), vendor-neutral and
+  built from a capture. `plugin-yamaha-rio-emulated` (kind `yamaha-rio-emulated`) puts a Rio3224-D2
+  on the network for a Yamaha console to control; the Yamaha half is `preamp-adapter-yamaha::mbc::{device,emulated}`.
+  Never run against a console. See docs/dante-emulation.md and AGENTS.md §4b
 - `oca` — internal object model; `oca-plugin-abi` — FFI host/plugin contract
 - `ocp1` — a *real* AES70-3 (OCP.1) controller. Not the same thing as `oca`
 - `plugin-*` — dynamically-loaded device plugins (cdylib), one per vendor

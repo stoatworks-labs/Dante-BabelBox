@@ -34,7 +34,7 @@ use abi_stable::{
     library::RootModule,
     package_version_strings, sabi_trait,
     sabi_types::VersionStrings,
-    std_types::{ROption, RResult, RString, RVec},
+    std_types::{ROption, RResult, RString, RVec, Tuple2},
     StableAbi,
 };
 
@@ -190,6 +190,12 @@ impl OcaEventFfi {
 /// The config needed to construct one device instance. `address` is
 /// carried as a plain string (rather than `std::net::IpAddr`, which isn't
 /// `StableAbi`) - parsed back into an `IpAddr` on whichever side needs it.
+///
+/// `options` was added after the other four fields, and that changes this
+/// struct's layout on purpose: every plugin ships with the host and is
+/// rebuilt with it, and a plugin binary built against the old four-field
+/// layout is refused at load by `abi_stable`'s layout check rather than
+/// misread.
 #[repr(C)]
 #[derive(StableAbi, Debug, Clone)]
 pub struct RDeviceConfig {
@@ -197,6 +203,19 @@ pub struct RDeviceConfig {
     pub address: ROption<RString>,
     pub port: ROption<u16>,
     pub channels: ROption<u16>,
+    /// Every other key from the device's config table, values rendered as
+    /// strings (`unit_id = 5` arrives as `("unit_id", "5")`). A plugin reads
+    /// the keys it knows with [`RDeviceConfig::option`] and ignores the rest.
+    pub options: RVec<Tuple2<RString, RString>>,
+}
+
+impl RDeviceConfig {
+    /// The value of the option named `key`, or `None` if the device's config
+    /// table didn't set it. The first match wins should a key ever appear
+    /// twice.
+    pub fn option(&self, key: &str) -> Option<&str> {
+        self.options.iter().find(|entry| entry.0.as_str() == key).map(|entry| entry.1.as_str())
+    }
 }
 
 #[repr(C)]
@@ -351,6 +370,24 @@ mod tests {
         let ffi: OcaObjectDescriptorFfi = descriptor.clone().into();
         let back: OcaObjectDescriptor = ffi.into();
         assert_eq!(descriptor, back);
+    }
+
+    #[test]
+    fn device_config_option_returns_the_first_match_or_none() {
+        let config = RDeviceConfig {
+            id: "rio-1".into(),
+            address: ROption::RNone,
+            port: ROption::RNone,
+            channels: ROption::RNone,
+            options: RVec::from(vec![
+                Tuple2("unit_id".into(), "5".into()),
+                Tuple2("model".into(), "Rio3224-D2".into()),
+                Tuple2("unit_id".into(), "9".into()),
+            ]),
+        };
+        assert_eq!(config.option("unit_id"), Some("5"));
+        assert_eq!(config.option("model"), Some("Rio3224-D2"));
+        assert_eq!(config.option("mac"), None);
     }
 
     #[test]

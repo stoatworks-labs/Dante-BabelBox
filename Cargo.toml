@@ -7,6 +7,7 @@ members = [
     "crates/ocp1",
     "crates/core",
     "crates/discovery",
+    "crates/emulation",
     "crates/preamp-adapter-osc",
     "crates/preamp-adapter-ah",
     "crates/preamp-adapter-yamaha",
@@ -21,6 +22,7 @@ members = [
     "crates/plugin-yamaha-dm3-scp",
     "crates/plugin-sennheiser-ewg3",
     "crates/plugin-rme-totalmix",
+    "crates/plugin-yamaha-rio-emulated",
     "crates/plugin-aes70",
     "crates/preamp-cli",
     "crates/preamp-web",
@@ -58,6 +60,7 @@ dante-babelbox-oca-plugin-abi = { path = "crates/oca-plugin-abi" }
 dante-babelbox-ocp1 = { path = "crates/ocp1" }
 dante-babelbox-core = { path = "crates/core" }
 dante-babelbox-discovery = { path = "crates/discovery" }
+dante-babelbox-emulation = { path = "crates/emulation" }
 dante-babelbox-preamp-adapter-osc = { path = "crates/preamp-adapter-osc" }
 dante-babelbox-preamp-adapter-ah = { path = "crates/preamp-adapter-ah" }
 dante-babelbox-preamp-adapter-yamaha = { path = "crates/preamp-adapter-yamaha" }

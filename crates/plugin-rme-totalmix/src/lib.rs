@@ -99,6 +99,7 @@ mod tests {
             address: address.map(|a| RSome(a.into())).unwrap_or(RNone),
             port: RNone,
             channels: channels.map(RSome).unwrap_or(RNone),
+            options: RVec::new(),
         }
     }
 

@@ -27,11 +27,12 @@ phantom-power changes (from a physical knob, an on-screen UI, or another
 app), and replays that same change on whichever device(s) you've mapped
 it to — regardless of vendor.
 
-It is **not** a device emulator. It doesn't make itself appear as a
-native device inside another console's own UI — you configure mappings
-by IP address and channel number in a config file, and it acts as a
-router in the middle. See the README's "Not yet built" section for what
-true device emulation would take.
+For most kinds it is a router in the middle, not a device: you configure
+mappings by IP address and channel number, and the consoles do not see it.
+The exception is `yamaha-rio-emulated`, where the bridge **is** a device:
+a virtual Rio that a Yamaha console mounts and controls from its own
+head-amp UI. That one is built from a capture and has never met a real
+console; see [docs/dante-emulation.md](docs/dante-emulation.md).
 
 ## How it works
 
@@ -215,6 +216,7 @@ declares:
 | `yamaha-dm3-scp` | Yamaha DM3 / DM3S (the recommended DM3 kind) | SCP/TCP | 49280 |
 | `sennheiser-ewg3` | Sennheiser EM 300/500 G3 receiver (gain = AF-out level) | binary WSM/UDP | 8133, fixed |
 | `rme-totalmix` | RME TotalMix FX hardware outputs, e.g. a Digiface Dante (gain = output fader) | Global OSC/UDP | 7001 (replies on 9001) |
+| `yamaha-rio-emulated` | An **emulated** Yamaha Rio3224-D2 for a CL/QL to control. `address` is this machine's own address on the Dante network; needs `unit_id` | mDNS + ARC + ConMon, `MBC` as the stagebox | 4440 / 8800 / 8700 / 8705 |
 | `aes70` | Any AES70 device, e.g. Focusrite RedNet | OCP.1/TCP | 65000 (convention only) |
 
 `ah-midi` (Qu/SQ) and `yamaha` (CL/QL/DM7, Rio/Tio) are recognized by the
@@ -223,21 +225,38 @@ protocol spec documents preamp control for those. Rio/Tio has since been
 captured and `MbcAdapter` implements it, but no plugin loads it yet, so
 the `yamaha` kind still refuses to start (see README's status table).
 
-A device can also be declared `virtual = true` — a placeholder for the
-not-yet-built device-emulation layer, with no `address` (there's nothing
-real to dial yet) and a `channels` count instead:
+A kind can take settings of its own. Any other key in a `[[device]]`
+table (a number, a string or a boolean) is handed to that device's plugin,
+which ignores the ones it doesn't know. `yamaha-rio-emulated` uses this:
+
+```toml
+[[device]]
+id = "virtual-rio"
+kind = "yamaha-rio-emulated"
+address = "169.254.10.20"   # this machine's address on the Dante network
+unit_id = 5                 # the console mounts it as Y005
+```
+
+Its full list of settings, and what to know before a console finds it (it
+will write its own gain and +48 V to all 32 channels), is in
+[docs/dante-emulation.md](docs/dante-emulation.md).
+
+A device can also be declared `virtual = true` — a placeholder with no
+network presence, no `address` (there's nothing to dial) and a `channels`
+count instead:
 
 ```toml
 [[device]]
 id = "future-x32"
-kind = "osc-x32"    # the protocol this virtual device will eventually emulate
+kind = "osc-x32"    # what this placeholder stands in for
 virtual = true
 channels = 8         # required when `kind` has no documented default channel count
 ```
 
 Virtual devices can be mapped against real ones like any other device -
-useful for designing the intended topology ahead of the emulation itself
-existing (or via the patch-bay web UI's "virtual device" option).
+useful for designing the intended topology before the device is there (or
+via the patch-bay web UI's "virtual device" option). A virtual device is
+not an emulated one: nothing on the network can see it.
 
 ### `[[mapping]]`
 

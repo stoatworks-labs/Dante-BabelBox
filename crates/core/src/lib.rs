@@ -12,7 +12,7 @@ mod types;
 
 pub use adapter::{AdapterError, AdapterResult, DeviceAdapter, DeviceInfo};
 pub use channel_mapping::ChannelMapping;
-pub use device::{default_channel_count, DeviceConfig};
+pub use device::{default_channel_count, DeviceConfig, OptionValue};
 pub use gain_lock::{GainLock, GainLockConfig, GainLockStatus};
 pub use legacy_plugin_bridge::LegacyPluginBridge;
 pub use law::DbLaw;

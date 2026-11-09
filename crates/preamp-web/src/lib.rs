@@ -216,6 +216,8 @@ async fn add_device(
         port: req.port,
         is_virtual: req.is_virtual,
         channels: req.channels,
+        // The add-device request has no way to set plugin options.
+        options: Default::default(),
     };
 
     let Some(channels) = device.channel_count() else {
@@ -571,6 +573,7 @@ mod tests {
             port: None,
             is_virtual: true,
             channels: Some(channels),
+            options: Default::default(),
         });
         state.descriptors.write().unwrap().insert(id.into(), channel_scheme::descriptors_for_channels(channels));
     }
@@ -1001,6 +1004,44 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         let (status, _) = call(&app, post("/api/gain-lock/preamp", r#"{"signal":"Nope","gain_db":1}"#)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// `DeviceConfig`'s extra keys as JSON. Lives here rather than beside
+    /// the TOML tests in `core` because `core` has no `serde_json`.
+    #[test]
+    fn a_device_config_with_options_round_trips_through_json() {
+        use dante_babelbox_core::OptionValue;
+
+        let device: DeviceConfig = serde_json::from_str(
+            r#"{"id":"rio-stage","kind":"yamaha-mbc","address":"169.254.1.5","port":null,"virtual":true,
+                "channels":32,"unit_id":5,"model":"Rio3224-D2","primary":true,"trim_db":2.0}"#,
+        )
+        .unwrap();
+        assert_eq!(device.address, Some("169.254.1.5".parse().unwrap()));
+        assert_eq!(device.port, None);
+        assert!(device.is_virtual);
+        assert_eq!(device.channels, Some(32));
+        assert_eq!(device.option("unit_id"), Some(&OptionValue::Integer(5)));
+        assert_eq!(device.option("model"), Some(&OptionValue::String("Rio3224-D2".into())));
+        assert_eq!(device.option("primary"), Some(&OptionValue::Bool(true)));
+        assert_eq!(device.option("trim_db"), Some(&OptionValue::Float(2.0)));
+        assert_eq!(device.options.len(), 4);
+
+        let json = serde_json::to_value(&device).unwrap();
+        assert_eq!(json["unit_id"], 5);
+        assert_eq!(json["virtual"], true);
+        assert!(json.get("options").is_none(), "options are flattened, not nested");
+        let back: DeviceConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(back.id, device.id);
+        assert_eq!(back.channels, device.channels);
+        assert_eq!(back.options, device.options);
+
+        let plain: DeviceConfig = serde_json::from_str(r#"{"id":"x32","kind":"osc-x32","address":"10.0.0.1"}"#).unwrap();
+        assert!(plain.options.is_empty());
+        let json = serde_json::to_value(&plain).unwrap();
+        let mut keys: Vec<&str> = json.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["address", "channels", "id", "kind", "port", "virtual"]);
     }
 
 }

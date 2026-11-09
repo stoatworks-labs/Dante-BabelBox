@@ -33,6 +33,11 @@ Copy that crate. It is ~50 lines of real code.
 
 ## The one real blocker: config shape
 
+> **Resolved 2026-11-09.** Option (a) below landed: `DeviceConfig` and
+> `RDeviceConfig` both carry an `options` map, filled from every other key in
+> the `[[device]]` table. `plugin-yamaha-rio-emulated` is the first plugin to
+> use it. The rest of this section is kept as the reasoning.
+
 `MbcAdapter::new` needs:
 
 ```rust

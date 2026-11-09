@@ -34,6 +34,13 @@
 > frame the Rio accepted byte for byte, but the adapter itself has still never been run against a
 > real device. The wire format is verified; the code around it is tested against captured frames,
 > like everything else here.
+>
+> **One thing here is not an exception and could be mistaken for one.** The bridge can also
+> *be* a Rio: an emulated Rio3224-D2 (kind `yamaha-rio-emulated`) for a Yamaha console to mount
+> and control. It was built from that same capture, and replayed against it, it answers the QL1's
+> head-amp messages exactly as the real Rio did, 237 out of 237. That is a strong test of its
+> answers and no test at all of whether a console accepts it. **It has never been in front of
+> one.** See [`docs/dante-emulation.md`](docs/dante-emulation.md).
 
 A control bridge for Dante rigs with kit from more than one manufacturer. It does two jobs:
 
@@ -127,6 +134,7 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 | Yamaha | CL, QL | `MBC` over Audinate ConMon | Partial — a QL/CL is the *controlling* side of the captured protocol, and the same adapter addresses it. Driving a console's own **local** head amps was never observed on the wire, so it is untested and may not be supported at all |
 | Yamaha | DM7 | — | Not implemented — no public spec, and nothing confirms it shares DM3's OSC dialect or the R-series `MBC` block |
 | Yamaha | Rio, Tio (R-series) | `MBC` over Audinate ConMon | Implemented — gain, +48 V and metering, from a wire format [captured and proven on real hardware](docs/yamaha-ha-remote-over-dante.md). Never run against a device. No plugin loads it yet, so `preamp-bridge` can't drive a Rio: see [docs/plugin-yamaha-mbc-sketch.md](docs/plugin-yamaha-mbc-sketch.md) |
+| Yamaha | Rio3224-D2, **emulated** (the bridge *is* the stagebox) | mDNS, ARC and ConMon as a Dante device, then `MBC` from the stagebox's side | **Built from a capture, never run against a console.** Kind `yamaha-rio-emulated`: a virtual Rio a CL/QL should mount and drive with its own head-amp controls, 32 channels of gain and +48 V, mapped on to anything else here. Replayed against a QL1 / Rio3224-D2 capture, its head-amp answers match the real Rio's on 237 of 237 messages, byte for byte. No audio. See [docs/dante-emulation.md](docs/dante-emulation.md) |
 | *Any AES70 vendor* | Focusrite RedNet (MP8R and any unit with AES70 enabled); expected to reach Bosch/Dynacord OMNEO and d&b without new code | AES70/OCA (OCP.1 over TCP) | Implemented from the **published standard** — no reverse engineering, and not vendor-specific. The device's objects, classes and names are discovered at runtime, so there is no vendor ONo map to be wrong. Never run against any AES70 device; see the plugin's module comment for the two things to check first. |
 | Aphex | 1788A | Parametric MIDI SysEx | **Codec only, no transport.** The byte string is built and parsed from Aphex's published command table (gain, phantom, pad, polarity, mute, low cut, limiter — more of this project's model than any other device here). Nothing sends it yet: the table is the MIDI layer, and how SysEx reaches the unit's Ethernet port isn't documented. See the crate's module comment |
 | Sennheiser | evolution wireless G3 (EM 300/500 G3) | **binary WSM protocol** (UDP 8133) | **Validated end-to-end on a real EM 500 G3** (2026-09-15): a DM3's remote head-amp gain drove the receiver's analog **AF-out level** through the bridge, confirmed on the hardware. Kind `sennheiser-ewg3`, one channel, gain = AF-out (−24…+18 dB, 3 dB steps). Reverse-engineered from Wireless Systems Manager — **not** the documented ASCII protocol (TI 1254, UDP 53212), which this receiver does not answer. Close WSM before bridging: it holds the receiver's single write-master slot. See [docs/sennheiser-ewg3-bench-2026-09-15.md](docs/sennheiser-ewg3-bench-2026-09-15.md) |
@@ -137,16 +145,21 @@ long-established community reference) rather than guesswork, and has unit and in
 against mock devices standing in for the real protocol. Each adapter's module doc comment
 (`crates/preamp-adapter-*/src/*.rs`) says which spec it's built from and what's still open.
 
-**Not yet built:** device emulation, where the bridge answers as if it *is* a native device of a
-foreign brand, so a console's own on-screen preamp UI can control it directly. For now the
-bridge is a translating router you set up by IP and channel. That's useful, but the consoles
-can still tell it's there. Emulation needs real hardware to build safely, because it means
-impersonating a device's discovery and pairing handshake well enough that real gear accepts it.
-The patch-bay web UI (below) already lets you declare **virtual** devices as placeholders for
-that layer and map them against real devices now, so you can design the topology before the
-emulation exists.
+**Device emulation, the first one built:** the bridge can answer as if it *is* a native device
+of a foreign brand, so a console's own on-screen preamp UI controls it directly. The first is a
+**virtual Yamaha Rio3224-D2** (kind `yamaha-rio-emulated`). A CL or QL should see a stagebox it
+knows, mount it and drive its head amps, and every move comes out of the bridge as an ordinary
+change you can map on to an Allen & Heath stagebox, a radio-mic receiver or an RME interface.
 
-Building it needs packet captures of a real console paired with its own native device (a real
+It's built from a packet capture of a real QL1 pairing with a real Rio, and checked against
+that capture message by message. **It has never been in front of a console.** It also carries
+no audio, so the real signal has to reach the console some other way. Both are spelled out, with
+a checklist for the first bench session, in [docs/dante-emulation.md](docs/dante-emulation.md).
+
+The patch-bay web UI (below) also lets you declare **virtual** devices: placeholders with no
+network presence at all, for designing a topology before the device (or its emulation) exists.
+
+Emulating anything else works the same way and needs the same thing first. Building it needs packet captures of a real console paired with its own native device (a real
 Yamaha QL1 talking to a real Rio or Tio, say, rather than another manufacturer's box), because
 none of that handshake is in any public spec. [`docs/`](docs/) has a non-technical field guide to
 capturing that traffic with Wireshark using nothing but a laptop as an inline bridge, one edition
@@ -210,6 +223,7 @@ crates/
 ├── oca-plugin-abi/            # abi_stable FFI contract for dynamically-loaded device plugins
 ├── core/                      # PluginRegistry, LocalAdapter, LegacyPluginBridge, Router
 ├── discovery/                 # mDNS-based Dante device discovery + Dante's own routing-observation protocol
+├── emulation/                 # a virtual Dante device's control plane (mDNS, ARC, ConMon) - no audio. See docs/dante-emulation.md
 ├── plugin-osc-x32/             # X32-family plugin (hand-written FFI translation - the original reference implementation)
 ├── plugin-osc-wing/             # Wing plugin (thin wrapper over LegacyPluginBridge)
 ├── plugin-ah-tcp/                # AHM plugin (thin wrapper over LegacyPluginBridge)
@@ -218,11 +232,12 @@ crates/
 ├── plugin-yamaha-dm3-scp/        # DM3 plugin, SCP transport — the hardware-validated one (thin wrapper)
 ├── plugin-sennheiser-ewg3/       # Sennheiser G3 receiver plugin (thin wrapper over LegacyPluginBridge)
 ├── plugin-rme-totalmix/          # RME TotalMix FX output faders plugin (thin wrapper over LegacyPluginBridge)
+├── plugin-yamaha-rio-emulated/   # an emulated Rio3224-D2 for a Yamaha console to control (thin wrapper)
 ├── plugin-aes70/                 # any AES70/OCA device (implements PluginAdapter directly)
 ├── ocp1/                       # vendor-neutral AES70 controller (OCP.1 over TCP), used by plugin-aes70
 ├── preamp-adapter-osc/         # X32/Wing OSC wire-protocol logic, reused by the two plugins above
 ├── preamp-adapter-ah/          # AHM/dLive wire-protocol logic, reused by the two plugins above, plus the DT168/DT164-W codec
-├── preamp-adapter-yamaha/      # DM3 (OSC `Dm3Adapter` + SCP `Dm3ScpAdapter`) and R-series MBC wire logic
+├── preamp-adapter-yamaha/      # DM3 (OSC `Dm3Adapter` + SCP `Dm3ScpAdapter`) and R-series MBC wire logic, both ends: driving a Rio, and being one
 ├── preamp-adapter-aphex/       # Aphex 1788A SysEx codec (codec only, no transport)
 ├── preamp-adapter-sennheiser-ewg3/  # Sennheiser evolution-wireless G3 (AF-out as gain) over the binary WSM protocol, UDP 8133
 ├── preamp-adapter-rme-totalmix/     # RME TotalMix FX hardware outputs (output fader as gain) over Global OSC
@@ -374,9 +389,10 @@ vendors (see "Plugin Architecture" above).
   mapped (a full grid of every channel across even two devices would run to tens of thousands of
   cells). Pin a device to bring all its channels into the grid when you want them.
 - **Device management:** add real devices (they connect straight away, same as one declared in
-  the config) or **virtual** ones. A virtual device is a placeholder for the emulation layer that
-  isn't built yet, with a channel count you choose and no live connection, so you can design a
-  mapping topology before there's any emulation to back it.
+  the config) or **virtual** ones. A virtual device is a placeholder: a channel count you choose
+  and no live connection, so you can design a mapping topology before the device is there. (An
+  *emulated* device is something else: a real kind, `yamaha-rio-emulated`, that is on the
+  network. See [docs/dante-emulation.md](docs/dante-emulation.md).)
 - **Export as TOML:** devices and mappings added through the UI only live in memory and are gone
   after a restart (which matches how the config hot-reload has always worked), so this button
   exports the current state for you to paste into `bridge.toml` and keep.
@@ -388,7 +404,7 @@ whether a device is real or virtual.
 
 ## Preamp Control — Config format
 
-[`bridge.example.toml`](bridge.example.toml) is a worked example. Its header describes all eight
+[`bridge.example.toml`](bridge.example.toml) is a worked example. Its header describes all ten
 device kinds this repo ships, and its `[[device]]` blocks use five of them. `kind` is an open
 string rather than a fixed list: a loaded plugin (see "Plugin Architecture" above) can register
 kinds beyond the ones this repo ships. The shape:
@@ -396,14 +412,20 @@ kinds beyond the ones this repo ships. The shape:
 ```toml
 [[device]]
 id = "ahm-rack"
-kind = "ah-tcp"        # osc-x32 | osc-wing | ah-tcp | dlive-tcp | yamaha-dm3 | yamaha-dm3-scp | sennheiser-ewg3 | rme-totalmix | aes70
+kind = "ah-tcp"        # osc-x32 | osc-wing | ah-tcp | dlive-tcp | yamaha-dm3 | yamaha-dm3-scp | yamaha-rio-emulated | sennheiser-ewg3 | rme-totalmix | aes70
 address = "10.0.0.10"
 port = 51325            # optional, defaults to the protocol's standard port
 
 [[device]]
+id = "virtual-rio"
+kind = "yamaha-rio-emulated"  # the bridge IS this device: a Rio for a Yamaha console to control
+address = "169.254.10.20"     # this machine's own address on the Dante network, where it appears
+unit_id = 5                   # a plugin's own settings sit beside the common ones
+
+[[device]]
 id = "future-x32"
-kind = "osc-x32"        # the protocol this virtual device will eventually emulate
-virtual = true          # placeholder for the not-yet-built emulation layer - no address needed
+kind = "osc-x32"        # what this placeholder stands in for
+virtual = true          # a placeholder with no network presence - no address needed
 channels = 8            # required when there's no documented default for `kind` (or to override it)
 
 [[mapping]]
@@ -421,7 +443,8 @@ a dLive physical preamp Socket number (which isn't the processing channel), a DM
 number, and so on. The relevant adapter's module doc comment has the exact ranges. `address` is
 required for every device that isn't virtual. `channels` is optional for real devices (it
 defaults to the kind's documented channel count) and required for kinds that don't document one
-(`ah-midi`, `yamaha`).
+(`ah-midi`, `yamaha`). Any other key in a `[[device]]` table (a number, a string or a boolean) is
+passed to that device's plugin; a plugin ignores keys it doesn't know.
 
 ## Radio Mic Telemetry — Status
 
@@ -541,9 +564,10 @@ are in **[docs/UNSIGNED.md](docs/UNSIGNED.md)**.
 - [ ] **Give the Aphex 1788A codec a transport.** `crates/preamp-adapter-aphex` builds and parses the SysEx correctly, but nothing delivers it. There are two candidate paths: the documented MIDI layer, or the unit's Ethernet port, whose SysEx framing isn't published. The choice decides whether this becomes an ordinary socket adapter or the first device here that needs a MIDI backend (plus ALSA headers in Linux release CI). A capture, or ten minutes with a 1788A, settles it, along with whether "Mic Channel" counts from 0 or 1 and what a `20h` dump reply looks like.
 - [ ] **Validate the rest of the adapters against real hardware.** The DM3 (SCP and OSC) and the Sennheiser G3 have run on real gear, on 2026-09-15; every other adapter is tested only against mock devices.
 - [ ] **Migrate the radio-mic domain onto plugins + OCA:** give it a `Router` in the process (it hasn't got one today, since it's pure monitoring), so telemetry mapping and parity with the web UI come for free.
-- [ ] **Ship plugin binaries in release CI.** `.github/workflows/release.yml` only builds the two host binaries today. Building and packaging all eight `crates/plugin-*` `cdylib`s per platform is a proper expansion of the CI, and it isn't done yet.
+- [ ] **Ship plugin binaries in release CI.** `.github/workflows/release.yml` only builds the two host binaries today. Building and packaging all ten `crates/plugin-*` `cdylib`s per platform is a proper expansion of the CI, and it isn't done yet.
 - [ ] **Get a third-party head-amp capture:** a Focusrite MP8R or, better, a **Rupert Neve RMP-D8**, driven from a CL/QL/PM/DM7. Both can act as Yamaha head amps, which would reuse the `MBC` work wholesale, and Rupert Neve say the RMP-D8 appears to the console *as a native Rio*, which is the very device already captured. Nothing about either can be worked out from the QL1/Rio captures, since neither was on that network. [`docs/rednet-mp8r-capture-request.md`](docs/rednet-mp8r-capture-request.md) says what a three-minute capture would need to contain.
-- [ ] **Preamp device emulation:** make the bridge answer as a native device of a foreign brand, so a console's own preamp UI controls it directly (needs packet captures of a real console and device paired together).
+- [ ] **Put the emulated Rio in front of a console.** `yamaha-rio-emulated` answers a captured QL1 exactly as the captured Rio did, and has never met a real one. [docs/dante-emulation.md](docs/dante-emulation.md) §5 is the bench checklist; §6 is the open question of getting the audio onto the same console channel.
+- [ ] **More emulated devices:** other R-series models, and an Allen & Heath DT168 for an SQ or dLive. Each needs a capture of the real device pairing with its console first.
 - [ ] **Telemetry emulation on a host console:** for example, putting ULX-D-shaped data on a Yamaha QL Wireless Monitor screen (the same problem, and it needs captures too).
 - [ ] **More preamp vendors:** Yamaha DM7, and the CL/QL's own local head amps, held up by missing public control specs or wire-format captures. (Rio/Tio has its adapter; see the R-series item above. Allen & Heath Qu/SQ now has scaffolding via the DT `AllenHth` ConMon codec; see the capture item above.) Thanks to the plugin path (see below), these don't have to land in this repo to exist.
 - [ ] **Wing:** only its 8 built-in preamps so far. Extend it to remote stagebox preamps.

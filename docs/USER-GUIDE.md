@@ -183,14 +183,18 @@ with `--no-web`.
 
 ### What "virtual" means
 
-A virtual device is a placeholder for an **emulation layer that isn't built yet**. Today the
-bridge is a translating router you set up by IP and channel. That's useful, but the consoles can
-still tell it's there. Making it answer as if it *is* a native device of a foreign brand, so a
-console's own preamp UI drives it directly, needs packet captures of real gear paired with its own
-native device, and none of that handshake is in any public spec.
+A virtual device is a placeholder: a name and a channel count with nothing behind them and
+nothing on the network. It lets you design the topology you want before the device is there.
 
-Virtual devices let you design the topology you want now, before there's any emulation to back
-it. If you can help with those captures, [`docs/`](.) has a non-technical field guide, one edition
+It isn't the same thing as an **emulated** device. Emulation is where the bridge answers as if it
+*is* a native device of a foreign brand, so a console's own preamp UI drives it directly. The first
+one exists: `yamaha-rio-emulated`, a virtual Rio3224-D2 for a Yamaha CL or QL. It's built from a
+packet capture of real gear and has never been in front of a console, and it carries no audio.
+[dante-emulation.md](dante-emulation.md) has the settings, the limits and a checklist for a first
+bench session.
+
+Emulating any other device needs packet captures of that device paired with its own console,
+because none of that handshake is in any public spec. If you can help with those captures, [`docs/`](.) has a non-technical field guide, one edition
 per OS: [Windows](capture-guide-windows.md) · [macOS](capture-guide-macos.md) ·
 [Linux](capture-guide-linux.md).
 
@@ -201,13 +205,13 @@ per OS: [Windows](capture-guide-windows.md) · [macOS](capture-guide-macos.md) �
 ```toml
 [[device]]
 id = "ahm-rack"
-kind = "ah-tcp"        # osc-x32 | osc-wing | ah-tcp | dlive-tcp | yamaha-dm3 | yamaha-dm3-scp | sennheiser-ewg3 | rme-totalmix | aes70
+kind = "ah-tcp"        # osc-x32 | osc-wing | ah-tcp | dlive-tcp | yamaha-dm3 | yamaha-dm3-scp | yamaha-rio-emulated | sennheiser-ewg3 | rme-totalmix | aes70
 address = "10.0.0.10"
 port = 51325           # optional — defaults to the protocol's standard port
 
 [[device]]
 id = "future-x32"
-kind = "osc-x32"       # the protocol this virtual device will eventually emulate
+kind = "osc-x32"       # what this placeholder stands in for
 virtual = true         # placeholder — no address needed
 channels = 8
 
@@ -240,6 +244,11 @@ A few kinds want more than an address:
   `port` is ignored, because the protocol is fixed on 8133. **Close Wireless Systems Manager
   first.** It holds the receiver's single write-master slot, and the receiver quietly drops
   writes from anyone else.
+- **`yamaha-rio-emulated`**: the bridge *is* the device. `address` is this machine's own address
+  on the Dante network, where the virtual Rio appears, and `unit_id` (required) is the stagebox
+  unit id the console mounts. `port` is ignored. **When a console finds it, the console writes
+  its own gain and +48 V to all 32 channels, and the bridge relays them to whatever is mapped.**
+  Never run against a real console; see [dante-emulation.md](dante-emulation.md).
 - **`rme-totalmix`**: `address` is the computer running TotalMix FX (usually `127.0.0.1`), not
   the interface. `port` is TotalMix's incoming OSC port (7001 if left out), and `channels`, the
   number of hardware outputs to expose, is required. In TotalMix's OSC settings, turn OSC on in
@@ -313,7 +322,7 @@ matters to you is **dynamic loading**: a plugin is a separate `.so`/`.dylib`/`.d
 from `--plugins-dir` (default `plugins`) at startup.
 
 **Adding a vendor needs no recompile of this project at all.** Build your plugin, drop the file
-in and restart the bridge. All eight device kinds this repo ships already work this way.
+in and restart the bridge. All ten device kinds this repo ships already work this way.
 
 [plugin-development-guide.md](plugin-development-guide.md) has the full contract, two worked
 examples, and the pitfalls that turned up while building it.

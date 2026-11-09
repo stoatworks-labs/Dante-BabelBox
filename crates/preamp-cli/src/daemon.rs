@@ -142,6 +142,15 @@ pub async fn run(
     tokio::signal::ctrl_c().await.context("waiting for Ctrl-C")?;
     info!("shutting down");
 
+    // Let every adapter close down properly. For most that is a socket
+    // closing a moment before the process would have closed it anyway. For
+    // an emulated device it is the difference between leaving the network
+    // and vanishing from it: its mDNS records are withdrawn here, so a
+    // console drops it now and not when the records time out.
+    for device in cfg.devices.iter().filter(|d| !d.is_virtual) {
+        router.deregister_device(&device.id).await;
+    }
+
     Ok(())
 }
 
@@ -248,6 +257,7 @@ mod tests {
                     port: Some(dlive_addr.port()),
                     is_virtual: false,
                     channels: None,
+                    options: Default::default(),
                 },
                 DeviceConfig {
                     id: "dm3".into(),
@@ -256,6 +266,7 @@ mod tests {
                     port: Some(dm3_addr.port()),
                     is_virtual: false,
                     channels: None,
+                    options: Default::default(),
                 },
             ],
             mappings: vec![ChannelMapping {
@@ -330,6 +341,7 @@ mod tests {
                     port: Some(dlive_addr.port()),
                     is_virtual: false,
                     channels: None,
+                    options: Default::default(),
                 },
                 DeviceConfig {
                     id: "mon".into(),
@@ -338,6 +350,7 @@ mod tests {
                     port: Some(x32_addr.port()),
                     is_virtual: false,
                     channels: None,
+                    options: Default::default(),
                 },
             ],
             mappings: Vec::new(),
@@ -440,7 +453,10 @@ mod tests {
                 // The DM3 ships two plugins: OSC (`yamaha-dm3`) and the
                 // hardware-validated SCP transport (`yamaha-dm3-scp`).
                 "yamaha-dm3",
-                "yamaha-dm3-scp"
+                "yamaha-dm3-scp",
+                // An emulated Rio: the one kind where the bridge is the
+                // device and not its client.
+                "yamaha-rio-emulated"
             ]
         );
     }
@@ -455,6 +471,7 @@ mod tests {
             port: None,
             is_virtual: false,
             channels: Some(8),
+            options: Default::default(),
         };
 
         let Err(err) = registry.create("ah-midi", &device("ah-midi")) else { panic!("expected an error") };

@@ -23,6 +23,7 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use abi_stable::std_types::Tuple2;
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use dante_babelbox_oca::{Ono, OcaAddress, OcaEvent, OcaObjectDescriptor, OcaValue};
@@ -154,6 +155,11 @@ fn to_ffi_config(config: &DeviceConfig) -> RDeviceConfig {
         address: config.address.map(|a| a.to_string().into()).into(),
         port: config.port.into(),
         channels: config.channel_count().into(),
+        options: config
+            .options
+            .iter()
+            .map(|(key, value)| Tuple2(key.as_str().into(), value.to_string().into()))
+            .collect(),
     }
 }
 
@@ -380,6 +386,7 @@ mod tests {
             port: None,
             is_virtual: false,
             channels: None,
+            options: Default::default(),
         }
     }
 
@@ -405,6 +412,32 @@ mod tests {
             Ok(_) => panic!("expected an error for an unregistered kind"),
         };
         assert!(err.to_string().contains("nonexistent-kind"));
+    }
+
+    #[test]
+    fn to_ffi_config_passes_options_through_as_strings() {
+        use crate::device::OptionValue;
+
+        let mut device = mock_device("rio-stage", "yamaha-mbc");
+        device.options.insert("unit_id".into(), OptionValue::Integer(5));
+        device.options.insert("model".into(), OptionValue::String("Rio3224-D2".into()));
+        device.options.insert("primary".into(), OptionValue::Bool(true));
+        device.options.insert("trim_db".into(), OptionValue::Float(1.5));
+
+        let ffi = to_ffi_config(&device);
+        assert_eq!(ffi.id.as_str(), "rio-stage");
+        assert_eq!(ffi.options.len(), 4);
+        assert_eq!(ffi.option("unit_id"), Some("5"));
+        assert_eq!(ffi.option("model"), Some("Rio3224-D2"));
+        assert_eq!(ffi.option("primary"), Some("true"));
+        assert_eq!(ffi.option("trim_db"), Some("1.5"));
+        assert_eq!(ffi.option("mac"), None);
+    }
+
+    #[test]
+    fn to_ffi_config_has_no_options_for_a_device_without_any() {
+        let ffi = to_ffi_config(&mock_device("d1", "mock-kind"));
+        assert!(ffi.options.is_empty());
     }
 
     #[test]

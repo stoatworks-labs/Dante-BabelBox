@@ -1,0 +1,17 @@
+[package]
+name = "dante-babelbox-emulation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A virtual Dante device's control plane: mDNS, ARC, ConMon. No audio."
+
+[dependencies]
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+mdns-sd = "0.21"
+socket2 = { version = "0.6", features = ["all"] }
+
+[dev-dependencies]
+dante-babelbox-discovery.workspace = true

@@ -82,15 +82,24 @@ offset  size  field
     28     4  00000000
     32     2  sequence, repeated
     34     2  0010
-    36     2  0001
+    36     2  number of vendor pieces that follow (0001 for a single MBC block)
     38     2  0000
     40     2  vendor payload length: (len(MBC block) + 1) << 8 | 0xC0
     42     .  the MBC block
+              ...then, for each further piece, another 2-byte length and the piece
 ```
 
 The length at offset 40 is the one non-obvious field — its high byte is the MBC
 block length **plus one**, its low byte is always `0xC0`. Getting this wrong is
 silent: the device simply ignores the packet.
+
+> **Corrected 2026-11-09.** Offset 36 is a count, not a constant, and **every**
+> piece has its own length in front of it. The Rio's power-up announcement puts
+> two MBC blocks in one packet; the console's first pair of reads does the
+> same; and the console's device poll travels with five two-byte pieces of some
+> other kind ahead of it (which is where the stray `0x00` and `0x80` low bytes
+> in §4.1 come from). A decoder that reads only the first length sees only the
+> first block. This project's did until now.
 
 Searching the UDP payload for the bytes `MBC` is a reliable shortcut when
 *reading*. When *writing*, the whole envelope has to be right.
@@ -115,6 +124,19 @@ Searching the UDP payload for the bytes `MBC` is a reliable shortcut when
   vary — short messages use `0x01`/`0x21`, but the 32-channel gain broadcast
   uses `0x00`/`0x20`. Getting this wrong produces a packet the device silently
   discards. Copy the value from the equivalent captured message.
+
+  **Worked out 2026-11-09** by reading the capture from the stagebox's side: the
+  low nibble is the *kind* of message, and the device answers with the same
+  nibble plus `0x20`.
+
+  | Console | Device | |
+  |---|---|---|
+  | `01` | `21` | read: a count and no data; the answer carries the data |
+  | `00` | `20` | write: the data; the answer is the data back |
+  | `02` | `22` | the `0x0731` arrays, handed straight back |
+  | `03` | `23` | start metering (`0x0742/00`); acknowledged with no data |
+  | | `10` | from a device, unprompted, to `ff:ff:ff:ff:ff:ff`: power-up announcements and its own state |
+  | | `13` | the metering stream |
 - `len_lo` — the low byte of `len`, repeated. Purpose unknown (**inferred**:
   a framing sanity check).
 
@@ -207,13 +229,13 @@ Present in the capture with a stable shape but no confirmed meaning.
 
 | Opcode | Subops | Notes |
 |---|---|---|
-| `0x0711` | `01`–`09` | pairing handshake; subop `05` carries the Dante device name as ASCII |
-| `0x0712`, `0x0713` | `0a` | single exchange each during pairing |
-| `0x071f` | `06` | ~6 s heartbeat, both directions |
+| `0x0711` | `01`–`09` | identity, read once at pairing: `03` is the unit id (u16), `04` the model name (16 bytes), `05` the Dante device name (32 bytes). The Rio answered `01` = `01000000`, `02` = `81550000` (it was firmware V1.85, and `0x55` is 85), `07` = `06`, `08` = `02`, `09` = `01` |
+| `0x0712`, `0x0713` | `0a` | input and output channel counts (u16): 32 and 24 from the Rio3224-D2 |
+| `0x071f` | `06` | **the device poll.** The console broadcasts a read every ~6 s; a device answers with unit id (u16), model (16 bytes) and Dante name (32 bytes). This is how a console finds a stagebox, and the pairing reads follow the first answer |
 | `0x0722` | `10`,`12`,`13`,`15`,`18`,`19`,`1a`,`1b` | further per-channel HA arrays — see below |
 | `0x0731` | `01` | 32 × uint8, all zero throughout |
 | `0x0731` | `02` | 24 × uint8, all zero throughout — note **24**, not 32 |
-| `0x0742` | `00` | metering (above) |
+| `0x0742` | `00` | metering (above). The stream is asked for: the console sends kind `03` about every 10 s, the device acknowledges and streams |
 
 ### The remaining `0x0722` subops — corrected
 
@@ -428,12 +450,34 @@ cargo run -p dante-babelbox-preamp-adapter-yamaha --example decode_mbc_capture -
   dante-captures/yamaha-ql1-rio3224d2/ql1-rio3224d2-pairing-gain-phantom.control.pcap
 ```
 
-It recovers 3 889 blocks — 142 gain updates, 20 phantom updates, 3 461 metering
-frames, 96 read requests — and reproduces the events this document describes
+It recovers 3 939 blocks — 142 gain updates, 20 phantom updates, 3 461 metering
+frames, 117 read requests — and reproduces the events this document describes
 from the packets alone: the stagebox announcing all 32 inputs at +36.00 dB and
 the console overwriting them with −6.00 dB **60 ms later** (§7), then the gain
 sweeps walking up and back down inputs 1→4 one at a time, and +48 V switching
 on across inputs 1–8. Nothing was told to the tool; it read it off the wire.
 
+(Until 2026-11-09 those figures read 3 889 and 96. The decoder was missing the
+second block of every packet that carried two; see the correction in §3.)
+
 **The captures themselves** now live in the private `dante-captures` repo,
 audio-stripped, with per-file provenance. The raw 1.7 GB original is local-only.
+
+## 12. The stagebox's side
+
+Everything above is written from the console's chair: how to drive a Rio. The
+same capture, read from the Rio's chair, is a complete account of how a
+stagebox answers a console, and that has been built too:
+`preamp-adapter-yamaha`'s `mbc::device` is a Rio's half of this protocol as a
+state machine, and kind `yamaha-rio-emulated` puts it on the network as a
+virtual Rio3224-D2 for a console to control.
+
+Put through the capture's 237 console messages it gives the Rio's own answer
+to every one, byte for byte. That includes one rule worth stating for anyone
+writing a device: **a read is answered with the request's `len` unchanged and
+the data appended** (§4.1 describes this as a trap for decoders; it is also
+how a device has to send, because it is the only form a console has been seen
+to accept).
+
+It has not been run against a console. See
+[`dante-emulation.md`](dante-emulation.md).
