@@ -271,6 +271,8 @@ struct AddMappingRequest {
     to: PreampAddress,
     #[serde(default)]
     bidirectional: bool,
+    #[serde(default)]
+    gain_offset_db: f32,
 }
 
 fn descriptors_for(state: &PatchState, device_id: &str) -> Vec<OcaObjectDescriptor> {
@@ -285,7 +287,15 @@ async fn add_mapping(State(state): State<PatchState>, Json(req): Json<AddMapping
         return Err(bad_request(format!("unknown device '{}'", req.to.device_id)));
     }
 
-    let candidate = ChannelMapping { from: req.from, to: req.to, bidirectional: req.bidirectional };
+    if !req.gain_offset_db.is_finite() {
+        return Err(bad_request("gain_offset_db must be a finite number of dB"));
+    }
+    let candidate = ChannelMapping {
+        from: req.from,
+        to: req.to,
+        bidirectional: req.bidirectional,
+        gain_offset_db: req.gain_offset_db,
+    };
     let exists =
         state.channel_mappings.read().unwrap().iter().any(|m| m.from == candidate.from && m.to == candidate.to);
     if exists {
@@ -793,6 +803,28 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn add_mapping_carries_a_gain_offset_onto_the_gain_object_only() {
+        let state = test_state();
+        insert_virtual(&state, "a", "osc-wing", 8);
+        insert_virtual(&state, "b", "osc-wing", 8);
+        let app = app(state.clone());
+
+        let (status, _) = call(
+            &app,
+            post(
+                "/api/mappings",
+                r#"{"from":{"device":"a","channel":1},"to":{"device":"b","channel":2},"gain_offset_db":-60.0}"#,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(state.channel_mappings.read().unwrap()[0].gain_offset_db, -60.0);
+        let mut offsets: Vec<f32> = state.router.mappings().iter().map(|m| m.offset_db).collect();
+        offsets.sort_by(f32::total_cmp);
+        assert_eq!(offsets, vec![-60.0, 0.0], "gain offset, phantom untouched");
     }
 
     #[tokio::test]

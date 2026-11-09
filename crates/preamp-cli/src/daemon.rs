@@ -262,6 +262,7 @@ mod tests {
                 from: PreampAddress::new("dlive", 12),
                 to: PreampAddress::new("dm3", 5),
                 bidirectional: true,
+                gain_offset_db: 0.0,
             }],
             gain_lock: None,
         };

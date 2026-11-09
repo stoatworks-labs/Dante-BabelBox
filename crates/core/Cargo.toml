@@ -14,3 +14,6 @@ anyhow.workspace = true
 dante-babelbox-oca.workspace = true
 dante-babelbox-oca-plugin-abi.workspace = true
 abi_stable.workspace = true
+
+[dev-dependencies]
+toml.workspace = true

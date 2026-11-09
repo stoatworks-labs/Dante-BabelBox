@@ -18,6 +18,41 @@ pub struct Mapping {
     pub to: OcaAddress,
     #[serde(default)]
     pub bidirectional: bool,
+    /// Added to an `F32` value on its way from `from` to `to`, and taken off
+    /// on the way back. Set only on gain objects (see
+    /// [`crate::ChannelMapping::gain_offset_db`]); any other value, and any
+    /// value on a mapping whose offset is `0`, passes unchanged.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub offset_db: f32,
+}
+
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
+}
+
+/// How far apart two `F32` values may be and still count as the same held
+/// value for echo suppression. An offset makes the round trip
+/// `(v + offset) - offset`, which f32 doesn't always bring back to exactly
+/// `v` (`12.3 - 36.0 + 36.0` can be `12.299999`); exact equality would read
+/// that as a change and push it back, and the next round would drift again.
+/// A thousandth of a dB is far below any step a device here can hold.
+const SAME_VALUE_DB: f32 = 1e-3;
+
+/// Whether `held` already is `value`, for echo suppression.
+fn already_holds(held: Option<&OcaValue>, value: &OcaValue) -> bool {
+    match (held, value) {
+        (Some(OcaValue::F32(a)), OcaValue::F32(b)) => (a - b).abs() <= SAME_VALUE_DB,
+        (Some(held), value) => held == value,
+        (None, _) => false,
+    }
+}
+
+/// `value` moved by `offset_db`, if it's a number and there is an offset.
+fn offset(value: &OcaValue, offset_db: f32) -> OcaValue {
+    match value {
+        OcaValue::F32(v) if offset_db != 0.0 => OcaValue::F32((*v as f64 + offset_db as f64) as f32),
+        other => other.clone(),
+    }
 }
 
 pub type SharedAdapter = Arc<Mutex<Box<dyn LocalAdapter>>>;
@@ -168,12 +203,13 @@ impl Router {
         // value and stop the loop.
         self.last_known.lock().await.insert(event.address.clone(), event.object.value.clone());
 
-        for peer in self.peers_of(&event.address) {
+        for (peer, offset_db) in self.peers_of(&event.address) {
             let device = self.devices.read().unwrap().get(&peer.device_id).cloned();
             let Some(device) = device else {
                 warn!(device_id = %peer.device_id, "mapping references unknown device");
                 continue;
             };
+            let value = offset(&event.object.value, offset_db);
 
             // Suppress by value-equality: never push a value the peer
             // already holds. Claiming the value (recording it as held)
@@ -185,28 +221,30 @@ impl Router {
             // one `set` per direction instead of ten rounds of them.
             {
                 let mut known = self.last_known.lock().await;
-                if known.get(&peer) == Some(&event.object.value) {
+                if already_holds(known.get(&peer), &value) {
                     debug!(address = ?peer, "peer already holds this value; suppressing echo");
                     continue;
                 }
-                known.insert(peer.clone(), event.object.value.clone());
+                known.insert(peer.clone(), value.clone());
             }
 
             let mut device = device.lock().await;
-            if let Err(e) = device.set_object(peer.ono, event.object.value.clone()).await {
+            if let Err(e) = device.set_object(peer.ono, value).await {
                 warn!(error = %e, ono = %peer.ono, "failed to propagate object value");
             }
         }
     }
 
-    fn peers_of(&self, addr: &OcaAddress) -> Vec<OcaAddress> {
+    /// Every address mapped to `addr`, with the offset to add on the way
+    /// there: the mapping's own going forwards, its negative coming back.
+    fn peers_of(&self, addr: &OcaAddress) -> Vec<(OcaAddress, f32)> {
         let mut peers = Vec::new();
         let mappings = self.mappings.read().unwrap();
         for m in mappings.iter() {
             if &m.from == addr {
-                peers.push(m.to.clone());
+                peers.push((m.to.clone(), m.offset_db));
             } else if m.bidirectional && &m.to == addr {
-                peers.push(m.from.clone());
+                peers.push((m.from.clone(), -m.offset_db));
             }
         }
         peers
@@ -315,7 +353,7 @@ mod tests {
         let (b, b_tx, _b_rx, b_state, _b_disc) = MockAdapter::new("b");
 
         let mapping =
-            Mapping { from: OcaAddress::new("a", Ono(1)), to: OcaAddress::new("b", Ono(5)), bidirectional: true };
+            Mapping { from: OcaAddress::new("a", Ono(1)), to: OcaAddress::new("b", Ono(5)), bidirectional: true, offset_db: 0.0 };
 
         let router = Router::new(vec![mapping]);
         router.register_device("a", Arc::new(Mutex::new(Box::new(a) as Box<dyn LocalAdapter>))).await;
@@ -334,6 +372,92 @@ mod tests {
         assert!(a_state.lock().unwrap().get(&1).is_none());
     }
 
+    fn bool_event(device_id: &str, ono: u32, on: bool) -> OcaEvent {
+        let address = OcaAddress::new(device_id, Ono(ono));
+        OcaEvent {
+            address: address.clone(),
+            object: OcaObject {
+                ono: address.ono,
+                class: OcaClass::Switch,
+                role: "Phantom".into(),
+                settable: true,
+                value: OcaValue::Bool(on),
+            },
+        }
+    }
+
+    type Registered = (
+        Arc<Router>,
+        broadcast::Sender<OcaEvent>,
+        broadcast::Sender<OcaEvent>,
+        Arc<StdMutex<HashMap<u32, OcaValue>>>,
+        Arc<StdMutex<HashMap<u32, OcaValue>>>,
+        (broadcast::Receiver<OcaEvent>, broadcast::Receiver<OcaEvent>),
+    );
+
+    /// `a`:1 mapped onto `b`:5 with an offset.
+    async fn offset_pair(offset_db: f32, bidirectional: bool) -> Registered {
+        let (a, a_tx, a_rx, a_state, _) = MockAdapter::new("a");
+        let (b, b_tx, b_rx, b_state, _) = MockAdapter::new("b");
+        let router = Router::new(vec![Mapping {
+            from: OcaAddress::new("a", Ono(1)),
+            to: OcaAddress::new("b", Ono(5)),
+            bidirectional,
+            offset_db,
+        }]);
+        router.register_device("a", Arc::new(Mutex::new(Box::new(a) as Box<dyn LocalAdapter>))).await;
+        router.register_device("b", Arc::new(Mutex::new(Box::new(b) as Box<dyn LocalAdapter>))).await;
+        (router, a_tx, b_tx, a_state, b_state, (a_rx, b_rx))
+    }
+
+    #[tokio::test]
+    async fn an_offset_is_added_going_forwards() {
+        let (_router, a_tx, _b_tx, _a_state, b_state, _rx) = offset_pair(-60.0, false).await;
+        a_tx.send(gain_event("a", 1, 30.0)).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(b_state.lock().unwrap().get(&5), Some(&OcaValue::F32(-30.0)));
+    }
+
+    #[tokio::test]
+    async fn an_offset_is_taken_off_coming_back() {
+        let (_router, _a_tx, b_tx, a_state, _b_state, _rx) = offset_pair(-60.0, true).await;
+        b_tx.send(gain_event("b", 5, -20.0)).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(a_state.lock().unwrap().get(&1), Some(&OcaValue::F32(40.0)));
+    }
+
+    #[tokio::test]
+    async fn a_one_way_mapping_does_not_offset_back_either() {
+        let (_router, _a_tx, b_tx, a_state, _b_state, _rx) = offset_pair(-60.0, false).await;
+        b_tx.send(gain_event("b", 5, -20.0)).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(a_state.lock().unwrap().get(&1).is_none());
+    }
+
+    #[tokio::test]
+    async fn an_echo_through_an_offset_settles_even_when_f32_does_not_round_trip() {
+        // 12.3 - 36.0 + 36.0 is not exactly 12.3 in f32 on every path; the
+        // echo of b's new value must still be recognised as already held.
+        let (_router, a_tx, b_tx, a_state, b_state, _rx) = offset_pair(-36.0, true).await;
+        a_tx.send(gain_event("a", 1, 12.3)).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let pushed = b_state.lock().unwrap().get(&5).and_then(OcaValue::as_f32).unwrap();
+        assert!((pushed - -23.7).abs() < 1e-4, "{pushed}");
+
+        // b confirms what it was given, and a must not be written back.
+        b_tx.send(gain_event("b", 5, pushed)).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(a_state.lock().unwrap().get(&1).is_none(), "the echo bounced back to a");
+    }
+
+    #[tokio::test]
+    async fn a_switch_is_never_offset() {
+        let (_router, a_tx, _b_tx, _a_state, b_state, _rx) = offset_pair(-60.0, false).await;
+        a_tx.send(bool_event("a", 1, true)).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(b_state.lock().unwrap().get(&5), Some(&OcaValue::Bool(true)));
+    }
+
     #[tokio::test]
     async fn update_mappings_takes_effect_on_a_running_router() {
         let (a, a_tx, _a_rx, _a_state, _a_disc) = MockAdapter::new("a");
@@ -341,7 +465,7 @@ mod tests {
         let (c, _c_tx, _c_rx, c_state, _c_disc) = MockAdapter::new("c");
 
         let mapping =
-            Mapping { from: OcaAddress::new("a", Ono(1)), to: OcaAddress::new("b", Ono(5)), bidirectional: false };
+            Mapping { from: OcaAddress::new("a", Ono(1)), to: OcaAddress::new("b", Ono(5)), bidirectional: false, offset_db: 0.0 };
 
         let router = Router::new(vec![mapping]);
         router.register_device("a", Arc::new(Mutex::new(Box::new(a) as Box<dyn LocalAdapter>))).await;
@@ -358,6 +482,7 @@ mod tests {
             from: OcaAddress::new("a", Ono(1)),
             to: OcaAddress::new("c", Ono(9)),
             bidirectional: false,
+            offset_db: 0.0,
         }]);
 
         a_tx.send(gain_event("a", 1, 2.0)).unwrap();
@@ -374,12 +499,14 @@ mod tests {
             from: OcaAddress::new("a", Ono(1)),
             to: OcaAddress::new("b", Ono(1)),
             bidirectional: true,
+            offset_db: 0.0,
         }]);
 
         router.add_mapping(Mapping {
             from: OcaAddress::new("a", Ono(2)),
             to: OcaAddress::new("b", Ono(2)),
             bidirectional: false,
+            offset_db: 0.0,
         });
         assert_eq!(router.mappings().len(), 2);
 
@@ -403,6 +530,7 @@ mod tests {
             from: OcaAddress::new("a", Ono(1)),
             to: OcaAddress::new("b", Ono(1)),
             bidirectional: false,
+            offset_db: 0.0,
         }]);
         router.register_device("a", Arc::new(Mutex::new(Box::new(a) as Box<dyn LocalAdapter>))).await;
         router.register_device("b", Arc::new(Mutex::new(Box::new(b) as Box<dyn LocalAdapter>))).await;
@@ -428,6 +556,7 @@ mod tests {
             from: OcaAddress::new("a", Ono(1)),
             to: OcaAddress::new("b", Ono(1)),
             bidirectional: false,
+            offset_db: 0.0,
         }]);
         router.register_device("a", Arc::new(Mutex::new(Box::new(a1) as Box<dyn LocalAdapter>))).await;
         router.register_device("b", Arc::new(Mutex::new(Box::new(b) as Box<dyn LocalAdapter>))).await;
@@ -574,7 +703,7 @@ mod tests {
             console: console.clone(),
         };
 
-        let router = Router::new(vec![Mapping { from: a_addr.clone(), to: b_addr.clone(), bidirectional: true }]);
+        let router = Router::new(vec![Mapping { from: a_addr.clone(), to: b_addr.clone(), bidirectional: true, offset_db: 0.0 }]);
         router.register_device("dm3-a", Arc::new(Mutex::new(Box::new(adapter_a) as Box<dyn LocalAdapter>))).await;
         router.register_device("dm3-b", Arc::new(Mutex::new(Box::new(adapter_b) as Box<dyn LocalAdapter>))).await;
 

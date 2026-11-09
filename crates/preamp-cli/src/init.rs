@@ -239,6 +239,7 @@ pub async fn infer_mappings(devices: &[DeviceConfig], arc_ports: &HashMap<IpAddr
                 from: PreampAddress::new(source_id, tx_number),
                 to: PreampAddress::new(device.id.clone(), rx.number),
                 bidirectional: true,
+                gain_offset_db: 0.0,
             });
         }
     }
@@ -457,6 +458,7 @@ mod tests {
                 from: PreampAddress::new("stagebox", 1),
                 to: PreampAddress::new("console", 5),
                 bidirectional: true,
+                gain_offset_db: 0.0,
             }],
             gain_lock: None,
         };

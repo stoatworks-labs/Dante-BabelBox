@@ -43,6 +43,15 @@ impl Config {
                     bail!("mapping references unknown device id '{}'", addr.device_id);
                 }
             }
+            if !m.gain_offset_db.is_finite() {
+                bail!(
+                    "mapping {}:{} -> {}:{} has a gain_offset_db that isn't a number",
+                    m.from.device_id,
+                    m.from.channel,
+                    m.to.device_id,
+                    m.to.channel
+                );
+            }
         }
         if let Some(gain_lock) = &self.gain_lock {
             if let Err(e) = gain_lock.validate(|id| ids.contains(id)) {
@@ -149,6 +158,20 @@ bidirectional = true
         assert_eq!(cfg.devices[1].kind, "osc-x32");
         assert_eq!(cfg.devices[1].port, Some(10023));
         assert!(cfg.mappings[0].bidirectional);
+    }
+
+    #[test]
+    fn parses_a_mapping_gain_offset_and_rejects_one_that_is_not_a_number() {
+        let with_offset = format!("{EXAMPLE}gain_offset_db = -60.0\n");
+        let path = write_temp(&with_offset);
+        let cfg = Config::load(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(cfg.mappings[0].gain_offset_db, -60.0);
+
+        let path = write_temp(&format!("{EXAMPLE}gain_offset_db = nan\n"));
+        let err = Config::load(&path).unwrap_err();
+        std::fs::remove_file(&path).ok();
+        assert!(err.to_string().contains("gain_offset_db"), "{err}");
     }
 
     #[test]

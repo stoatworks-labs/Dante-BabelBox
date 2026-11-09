@@ -20,10 +20,11 @@
 //! 9001 out. TotalMix replies to one remote only, so nothing else may be on
 //! UDP 9001 here (Companion's TotalMix module listens there by default).
 //!
-//! **Levels are 1:1 in dB.** The bridge's mappings copy dB unchanged, and a
-//! preamp's gain sits far above an output fader's range: a +30 dB preamp
-//! mapped straight onto an output puts it at +6 dB, TotalMix's top. Don't
-//! map a preamp onto an output until something offsets the level.
+//! **Mapping a preamp onto an output needs an offset.** Gain is copied in
+//! dB, and a preamp's gain sits far above an output fader's range: a +30 dB
+//! preamp mapped straight onto an output puts it at +6 dB, TotalMix's top.
+//! Give the mapping `gain_offset_db = -60.0` (or to taste) so the preamp's
+//! -6..+66 dB lands on -66..+6 dB.
 
 pub mod adapter;
 pub mod law;

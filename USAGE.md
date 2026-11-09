@@ -246,6 +246,7 @@ existing (or via the patch-bay web UI's "virtual device" option).
 from = { device = "ahm-rack", channel = 3 }
 to   = { device = "x32-monitors", channel = 7 }
 bidirectional = true    # optional, defaults to false (one-way: from -> to)
+gain_offset_db = 0.0    # optional: dB added to the gain going from -> to, taken off coming back
 ```
 
 `device` must match a `[[device]] id`. `channel` means whatever that
@@ -271,6 +272,22 @@ You can chain more than one mapping off the same device/channel to fan a
 single preamp's changes out to several peers, and mark any mapping
 `bidirectional = true` to let either side drive the other (with echo
 suppression preventing feedback loops).
+
+`gain_offset_db` is for two controls whose ranges don't line up. Gain is
+copied in dB, so without it a console preamp at +30 dB mapped onto an RME
+output fader (−65…+6 dB) puts that output at +6 dB, its top. With
+`gain_offset_db = -60.0` the preamp's −6…+66 dB lands on −66…+6 dB: +30 on
+the desk is −30 on the output, and the bottom of the knob turns it off. On
+a bidirectional mapping the offset comes back off going the other way (a
+fader at −20 dB sets the preamp to +40). Phantom is never offset. Each side
+still clamps to its own range.
+
+```toml
+[[mapping]]
+from = { device = "dm3-foh", channel = 2 }
+to   = { device = "digiface", channel = 1 }   # kind = "rme-totalmix"
+gain_offset_db = -60.0
+```
 
 ### `[gain_lock]`
 

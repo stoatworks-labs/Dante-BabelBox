@@ -354,6 +354,7 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+ "toml",
  "tracing",
 ]
 

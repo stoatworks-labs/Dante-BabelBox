@@ -19,6 +19,18 @@ pub struct ChannelMapping {
     pub to: PreampAddress,
     #[serde(default)]
     pub bidirectional: bool,
+    /// dB added to the gain on its way from `from` to `to`, and taken off
+    /// again on the way back. For two controls whose ranges don't line up:
+    /// a console preamp (-6..+66 dB) driving an output fader (-65..+6 dB)
+    /// wants about -60, or the output is pinned at its top. Phantom is
+    /// never touched. `0`, the default, copies gain unchanged, as every
+    /// mapping did before this field existed.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub gain_offset_db: f32,
+}
+
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
 }
 
 /// Resolves one [`ChannelMapping`] into zero or more OCA [`Mapping`]s,
@@ -43,6 +55,7 @@ pub fn resolve(
                 from: OcaAddress::new(mapping.from.device_id.clone(), from_ono),
                 to: OcaAddress::new(mapping.to.device_id.clone(), to_ono),
                 bidirectional: mapping.bidirectional,
+                offset_db: if field == "Gain" { mapping.gain_offset_db } else { 0.0 },
             })
         })
         .collect()
@@ -59,6 +72,7 @@ mod tests {
             from: PreampAddress::new("a", 1),
             to: PreampAddress::new("b", 5),
             bidirectional: true,
+            gain_offset_db: 0.0,
         };
         let from_descriptors = channel_scheme::descriptors_for_channels(4);
         let to_descriptors = channel_scheme::descriptors_for_channels(8);
@@ -73,11 +87,46 @@ mod tests {
     }
 
     #[test]
+    fn the_gain_offset_goes_on_the_gain_mapping_only() {
+        let mapping = ChannelMapping {
+            from: PreampAddress::new("a", 1),
+            to: PreampAddress::new("b", 5),
+            bidirectional: false,
+            gain_offset_db: -60.0,
+        };
+        let descriptors = channel_scheme::descriptors_for_channels(8);
+
+        let resolved = resolve(&mapping, &descriptors, &descriptors);
+        assert_eq!(resolved[0].from.ono, channel_scheme::gain_ono(1));
+        assert_eq!(resolved[0].offset_db, -60.0);
+        assert_eq!(resolved[1].from.ono, channel_scheme::phantom_ono(1));
+        assert_eq!(resolved[1].offset_db, 0.0, "phantom must never be offset");
+    }
+
+    #[test]
+    fn a_mapping_without_an_offset_reads_and_writes_as_before() {
+        let mapping: ChannelMapping = toml::from_str(
+            "from = { device = \"a\", channel = 1 }\nto = { device = \"b\", channel = 2 }\n",
+        )
+        .unwrap();
+        assert_eq!(mapping.gain_offset_db, 0.0);
+        let written = toml::to_string(&mapping).unwrap();
+        assert!(!written.contains("gain_offset_db"), "{written}");
+
+        let offset: ChannelMapping = toml::from_str(
+            "from = { device = \"a\", channel = 1 }\nto = { device = \"b\", channel = 2 }\ngain_offset_db = -60.0\n",
+        )
+        .unwrap();
+        assert_eq!(offset.gain_offset_db, -60.0);
+    }
+
+    #[test]
     fn skips_fields_missing_on_either_side_rather_than_erroring() {
         let mapping = ChannelMapping {
             from: PreampAddress::new("a", 1),
             to: PreampAddress::new("b", 99), // out of range for an 8-channel device
             bidirectional: false,
+            gain_offset_db: 0.0,
         };
         let from_descriptors = channel_scheme::descriptors_for_channels(4);
         let to_descriptors = channel_scheme::descriptors_for_channels(8);

@@ -215,7 +215,13 @@ channels = 8
 from = { device = "ahm-rack", channel = 3 }
 to   = { device = "x32-monitors", channel = 7 }
 bidirectional = true
+# gain_offset_db = -60.0  # optional: added to the gain going from -> to, taken off coming back
 ```
+
+Gain is copied in dB. **`gain_offset_db`** shifts it for two controls whose ranges don't line up:
+with −60, a preamp's −6 to +66 dB lands on an output fader's −66 to +6 dB, so +30 dB on the desk
+is −30 dB on the output. On a bidirectional mapping the offset comes off again going the other
+way. Phantom is never offset, and each device still clamps to its own range.
 
 > **`channel` means whatever the underlying protocol's own addressing unit is:** an X32 headamp
 > number (1–128: local 1–32, AES50-A 33–80, AES50-B 81–128), a dLive physical preamp **Socket**
@@ -239,9 +245,8 @@ A few kinds want more than an address:
   number of hardware outputs to expose, is required. In TotalMix's OSC settings, turn OSC on in
   Global mode, set Remote IP to the machine running the bridge and leave the outgoing port at
   9001: the bridge reads TotalMix's replies there, so nothing else (such as Companion's TotalMix
-  module) can be listening on 9001. **Levels map 1:1 in dB**, so a preamp at +30 dB mapped onto
-  an output puts that output at +6 dB, TotalMix's top. Don't map a preamp's gain straight onto
-  an output.
+  module) can be listening on 9001. **Give a preamp-to-output mapping a `gain_offset_db`**
+  (about −60): without one, a preamp at +30 dB puts the output at +6 dB, TotalMix's top.
 - **`aes70`**: on RedNet, enable AES70 in RedNet Control's per-device Tools menu first (RedNet
   Control needn't stay running afterwards). `channels` is ignored, since the device reports its
   own. AES70 assigns no port: 65000 is the usual convention, but check the device's `_oca._tcp`

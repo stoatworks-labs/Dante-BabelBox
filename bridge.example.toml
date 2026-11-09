@@ -7,8 +7,8 @@
 #   "rme-totalmix" RME TotalMix FX hardware outputs (e.g. a Digiface
 #                Dante): channel N = output N, gain = its fader in dB,
 #                -65 (off) to +6. `address` is the computer running
-#                TotalMix, `port` 7001, `channels` required. Levels map
-#                1:1, so never map a preamp's gain straight onto it
+#                TotalMix, `port` 7001, `channels` required. A preamp
+#                driving it needs `gain_offset_db` on the mapping (below)
 #   "osc-wing"   Behringer Wing's own OSC dialect (console's 8 built-in
 #                LCL preamps only for now - see adapter-osc's wing.rs)
 #   "ah-tcp"     Allen & Heath AHM-series Dante/AES67 processors
@@ -97,6 +97,17 @@ bidirectional = true
 from = { device = "dlive-mixrack", channel = 20 }
 to   = { device = "dm3-foh", channel = 5 }
 bidirectional = true
+
+# Gain is copied in dB. `gain_offset_db` shifts it on the way from -> to (and
+# back, on a bidirectional mapping) when the two ranges don't line up: a
+# preamp's -6..+66 dB onto an RME output fader's -65..+6 dB wants about -60,
+# or the output sits at its top. Phantom is never offset. For example, with an
+# `rme-totalmix` device "digiface" added above:
+#
+# [[mapping]]
+# from = { device = "dm3-foh", channel = 2 }
+# to   = { device = "digiface", channel = 1 }
+# gain_offset_db = -60.0
 
 # Gain compensation ("gain lock") - see docs/GAIN-LOCK.md. One desk leads the
 # shared preamps; while locked, each follower desk's input trim takes the
