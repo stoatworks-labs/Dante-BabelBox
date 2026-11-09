@@ -55,6 +55,10 @@ It has 32 channels, each with gain (−6 to +66 dB in whole dB, a Rio's range
 and step) and +48 V. There is no pad: which of the Rio's arrays carries it is
 still unknown, and the adapter reports `None` instead of guessing.
 
+Add it in `bridge.toml`. The patch-bay web UI's add-device form has no field for
+`unit_id` (or any other per-kind setting) yet, so it cannot create one; once the
+bridge is running the device shows there and maps like any other.
+
 For a first session with a real console, run it on its own. A plugin's log
 lines do not reach `preamp-bridge`'s log; this prints everything:
 
