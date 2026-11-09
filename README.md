@@ -130,6 +130,7 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 | *Any AES70 vendor* | Focusrite RedNet (MP8R and any unit with AES70 enabled); expected to reach Bosch/Dynacord OMNEO and d&b without new code | AES70/OCA (OCP.1 over TCP) | Implemented from the **published standard** — no reverse engineering, and not vendor-specific. The device's objects, classes and names are discovered at runtime, so there is no vendor ONo map to be wrong. Never run against any AES70 device; see the plugin's module comment for the two things to check first. |
 | Aphex | 1788A | Parametric MIDI SysEx | **Codec only, no transport.** The byte string is built and parsed from Aphex's published command table (gain, phantom, pad, polarity, mute, low cut, limiter — more of this project's model than any other device here). Nothing sends it yet: the table is the MIDI layer, and how SysEx reaches the unit's Ethernet port isn't documented. See the crate's module comment |
 | Sennheiser | evolution wireless G3 (EM 300/500 G3) | **binary WSM protocol** (UDP 8133) | **Validated end-to-end on a real EM 500 G3** (2026-09-15): a DM3's remote head-amp gain drove the receiver's analog **AF-out level** through the bridge, confirmed on the hardware. Kind `sennheiser-ewg3`, one channel, gain = AF-out (−24…+18 dB, 3 dB steps). Reverse-engineered from Wireless Systems Manager — **not** the documented ASCII protocol (TI 1254, UDP 53212), which this receiver does not answer. Close WSM before bridging: it holds the receiver's single write-master slot. See [docs/sennheiser-ewg3-bench-2026-09-15.md](docs/sennheiser-ewg3-bench-2026-09-15.md) |
+| RME | Any interface TotalMix FX 2.1+ drives, e.g. Digiface Dante | TotalMix **Global OSC** (UDP 7001 in, 9001 back) | Implemented, tested against a stand-in only. Kind `rme-totalmix`: channel N is TotalMix hardware output N, gain is its fader (−65 dB = off, to +6 dB). `address` is the computer running TotalMix, not the interface. Built from the `rme-totalmix` Companion module 1.0.1, whose routing messages ran on a real Digiface Dante on 2026-11-05; the output-fader message hasn't. Levels map 1:1 in dB, so don't map a preamp's gain straight onto an output |
 
 Every "Done" adapter is built from an official vendor spec (or, for the X32 family, the
 long-established community reference) rather than guesswork, and has unit and integration tests
@@ -216,6 +217,7 @@ crates/
 ├── plugin-yamaha-dm3/            # DM3 plugin, OSC transport (thin wrapper over LegacyPluginBridge)
 ├── plugin-yamaha-dm3-scp/        # DM3 plugin, SCP transport — the hardware-validated one (thin wrapper)
 ├── plugin-sennheiser-ewg3/       # Sennheiser G3 receiver plugin (thin wrapper over LegacyPluginBridge)
+├── plugin-rme-totalmix/          # RME TotalMix FX output faders plugin (thin wrapper over LegacyPluginBridge)
 ├── plugin-aes70/                 # any AES70/OCA device (implements PluginAdapter directly)
 ├── ocp1/                       # vendor-neutral AES70 controller (OCP.1 over TCP), used by plugin-aes70
 ├── preamp-adapter-osc/         # X32/Wing OSC wire-protocol logic, reused by the two plugins above
@@ -223,6 +225,7 @@ crates/
 ├── preamp-adapter-yamaha/      # DM3 (OSC `Dm3Adapter` + SCP `Dm3ScpAdapter`) and R-series MBC wire logic
 ├── preamp-adapter-aphex/       # Aphex 1788A SysEx codec (codec only, no transport)
 ├── preamp-adapter-sennheiser-ewg3/  # Sennheiser evolution-wireless G3 (AF-out as gain) over the binary WSM protocol, UDP 8133
+├── preamp-adapter-rme-totalmix/     # RME TotalMix FX hardware outputs (output fader as gain) over Global OSC
 ├── preamp-web/                 # Patch-bay web UI + device/mapping management API (axum)
 └── preamp-cli/                 # `preamp-bridge` binary: discover, init, run, config, hot-reload
 ```
@@ -238,7 +241,7 @@ device as a loadable plugin.
 
 All the preamp vendors ship as dynamically loaded plugins. X32's FFI translation is
 hand-written (it was this project's original proof of concept, and predates the generic wrapper).
-Wing, AHM, dLive, DM3 and the Sennheiser G3 are thin crates built on `core::LegacyPluginBridge`,
+Wing, AHM, dLive, DM3, the Sennheiser G3 and RME TotalMix are thin crates built on `core::LegacyPluginBridge`,
 which wraps the older in-process `DeviceAdapter` trait (connect, set_gain, set_phantom,
 get_state, subscribe) generically, so their existing, already-tested wire-protocol code didn't
 need rewriting to become a plugin. Each vendor only needed a `create_adapter`/`plugin_info` pair.
@@ -269,6 +272,7 @@ flowchart LR
     Dm3["libplugin_yamaha_dm3"] -. abi_stable FFI .-> Reg
     Dm3Scp["libplugin_yamaha_dm3_scp"] -. abi_stable FFI .-> Reg
     Ewg3["libplugin_sennheiser_ewg3"] -. abi_stable FFI .-> Reg
+    TotalMix["libplugin_rme_totalmix"] -. abi_stable FFI .-> Reg
     Aes70["libplugin_aes70"] -. abi_stable FFI .-> Reg
     Router["Router (OCA objects)"] --> Web["Patch-bay web UI"]
 ```
@@ -392,7 +396,7 @@ kinds beyond the ones this repo ships. The shape:
 ```toml
 [[device]]
 id = "ahm-rack"
-kind = "ah-tcp"        # osc-x32 | osc-wing | ah-tcp | dlive-tcp | yamaha-dm3 | yamaha-dm3-scp | sennheiser-ewg3 | aes70
+kind = "ah-tcp"        # osc-x32 | osc-wing | ah-tcp | dlive-tcp | yamaha-dm3 | yamaha-dm3-scp | sennheiser-ewg3 | rme-totalmix | aes70
 address = "10.0.0.10"
 port = 51325            # optional, defaults to the protocol's standard port
 

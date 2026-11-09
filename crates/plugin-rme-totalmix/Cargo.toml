@@ -1,0 +1,15 @@
+[package]
+name = "dante-babelbox-plugin-rme-totalmix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "dante_babelbox_plugin_rme_totalmix"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dante-babelbox-core.workspace = true
+dante-babelbox-oca-plugin-abi.workspace = true
+dante-babelbox-preamp-adapter-rme-totalmix.workspace = true
+abi_stable.workspace = true

@@ -58,6 +58,7 @@ It does two separate jobs:
 | Yamaha | DM3 / DM3S | SCP (TCP 49280) | **Validated on a real DM3** (2026-09-15). Kind `yamaha-dm3-scp`, and the one to use for a DM3 |
 | Yamaha | DM3 / DM3S | OSC (UDP 49900) | Works, and also ran on the real DM3, but an OSC `set` gets no reply and the desk pushes no OSC changes, so read-after-write and the change feed are weaker than SCP. Kind `yamaha-dm3` |
 | Sennheiser | evolution wireless G3 (EM 300/500 G3) | Binary WSM protocol (UDP 8133) | **Validated on a real EM 500 G3** (2026-09-15). One channel, whose gain is the receiver's AF-out level (−24 to +18 dB in 3 dB steps). Reverse-engineered from Wireless Systems Manager. Kind `sennheiser-ewg3` |
+| RME | Any interface TotalMix FX 2.1+ drives, e.g. Digiface Dante | TotalMix Global OSC (UDP 7001, replies on 9001) | Implemented, tested against a stand-in only. Channel N is TotalMix hardware output N and its gain is the output fader, from −65 dB (off) to +6 dB. Kind `rme-totalmix` |
 | *Any AES70 vendor* | Focusrite RedNet (MP8R and any unit with AES70 enabled) | AES70/OCA (OCP.1 over TCP) | Implemented from the published standard, with the device's objects discovered when the bridge connects. Never run against any AES70 device. Kind `aes70` |
 | Allen & Heath | DT168, DT164-W | `AllenHth` messages over Audinate ConMon | **Codec only, no transport.** Reverse-engineered from A&H's *DT Preamp Control* app and the SQ's Dante-card firmware, with no capture and no hardware. See [allenheath-dt-preamp-over-dante.md](allenheath-dt-preamp-over-dante.md) |
 | Allen & Heath | Qu, SQ | — | **Not implemented.** The SQ's Dante card registers the same `AllenHth` namespace as the DT expanders, so the DT codec is the likeliest route, pending a capture |
@@ -200,7 +201,7 @@ per OS: [Windows](capture-guide-windows.md) · [macOS](capture-guide-macos.md) �
 ```toml
 [[device]]
 id = "ahm-rack"
-kind = "ah-tcp"        # osc-x32 | osc-wing | ah-tcp | dlive-tcp | yamaha-dm3 | yamaha-dm3-scp | sennheiser-ewg3 | aes70
+kind = "ah-tcp"        # osc-x32 | osc-wing | ah-tcp | dlive-tcp | yamaha-dm3 | yamaha-dm3-scp | sennheiser-ewg3 | rme-totalmix | aes70
 address = "10.0.0.10"
 port = 51325           # optional — defaults to the protocol's standard port
 
@@ -233,6 +234,14 @@ A few kinds want more than an address:
   `port` is ignored, because the protocol is fixed on 8133. **Close Wireless Systems Manager
   first.** It holds the receiver's single write-master slot, and the receiver quietly drops
   writes from anyone else.
+- **`rme-totalmix`**: `address` is the computer running TotalMix FX (usually `127.0.0.1`), not
+  the interface. `port` is TotalMix's incoming OSC port (7001 if left out), and `channels`, the
+  number of hardware outputs to expose, is required. In TotalMix's OSC settings, turn OSC on in
+  Global mode, set Remote IP to the machine running the bridge and leave the outgoing port at
+  9001: the bridge reads TotalMix's replies there, so nothing else (such as Companion's TotalMix
+  module) can be listening on 9001. **Levels map 1:1 in dB**, so a preamp at +30 dB mapped onto
+  an output puts that output at +6 dB, TotalMix's top. Don't map a preamp's gain straight onto
+  an output.
 - **`aes70`**: on RedNet, enable AES70 in RedNet Control's per-device Tools menu first (RedNet
   Control needn't stay running afterwards). `channels` is ignored, since the device reports its
   own. AES70 assigns no port: 65000 is the usual convention, but check the device's `_oca._tcp`

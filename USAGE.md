@@ -214,6 +214,7 @@ declares:
 | `yamaha-dm3` | Yamaha DM3 / DM3S | OSC/UDP | 49900 |
 | `yamaha-dm3-scp` | Yamaha DM3 / DM3S (the recommended DM3 kind) | SCP/TCP | 49280 |
 | `sennheiser-ewg3` | Sennheiser EM 300/500 G3 receiver (gain = AF-out level) | binary WSM/UDP | 8133, fixed |
+| `rme-totalmix` | RME TotalMix FX hardware outputs, e.g. a Digiface Dante (gain = output fader) | Global OSC/UDP | 7001 (replies on 9001) |
 | `aes70` | Any AES70 device, e.g. Focusrite RedNet | OCP.1/TCP | 65000 (convention only) |
 
 `ah-midi` (Qu/SQ) and `yamaha` (CL/QL/DM7, Rio/Tio) are recognized by the

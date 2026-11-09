@@ -526,6 +526,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dante-babelbox-plugin-rme-totalmix"
+version = "0.5.0"
+dependencies = [
+ "abi_stable",
+ "dante-babelbox-core",
+ "dante-babelbox-oca-plugin-abi",
+ "dante-babelbox-preamp-adapter-rme-totalmix",
+]
+
+[[package]]
 name = "dante-babelbox-plugin-sennheiser-ewg3"
 version = "0.5.0"
 dependencies = [
@@ -578,6 +588,18 @@ dependencies = [
 
 [[package]]
 name = "dante-babelbox-preamp-adapter-osc"
+version = "0.5.0"
+dependencies = [
+ "async-trait",
+ "dante-babelbox-core",
+ "rosc",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "dante-babelbox-preamp-adapter-rme-totalmix"
 version = "0.5.0"
 dependencies = [
  "async-trait",

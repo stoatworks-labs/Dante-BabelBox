@@ -12,6 +12,7 @@ members = [
     "crates/preamp-adapter-yamaha",
     "crates/preamp-adapter-aphex",
     "crates/preamp-adapter-sennheiser-ewg3",
+    "crates/preamp-adapter-rme-totalmix",
     "crates/plugin-osc-x32",
     "crates/plugin-osc-wing",
     "crates/plugin-ah-tcp",
@@ -19,6 +20,7 @@ members = [
     "crates/plugin-yamaha-dm3",
     "crates/plugin-yamaha-dm3-scp",
     "crates/plugin-sennheiser-ewg3",
+    "crates/plugin-rme-totalmix",
     "crates/plugin-aes70",
     "crates/preamp-cli",
     "crates/preamp-web",
@@ -61,6 +63,7 @@ dante-babelbox-preamp-adapter-ah = { path = "crates/preamp-adapter-ah" }
 dante-babelbox-preamp-adapter-yamaha = { path = "crates/preamp-adapter-yamaha" }
 dante-babelbox-preamp-adapter-aphex = { path = "crates/preamp-adapter-aphex" }
 dante-babelbox-preamp-adapter-sennheiser-ewg3 = { path = "crates/preamp-adapter-sennheiser-ewg3" }
+dante-babelbox-preamp-adapter-rme-totalmix = { path = "crates/preamp-adapter-rme-totalmix" }
 dante-babelbox-preamp-web = { path = "crates/preamp-web" }
 dante-babelbox-mic-core = { path = "crates/mic-core" }
 dante-babelbox-mic-adapter-shure = { path = "crates/mic-adapter-shure" }

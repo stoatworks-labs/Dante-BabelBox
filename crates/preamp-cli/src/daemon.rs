@@ -431,6 +431,8 @@ mod tests {
                 "osc-wing",
                 "osc-x32",
                 "rednet-aes70",
+                // RME TotalMix FX hardware outputs (output fader as gain).
+                "rme-totalmix",
                 // Sennheiser evolution-wireless G3 receiver (AF-out as gain).
                 "sennheiser-ewg3",
                 "yamaha",
