@@ -64,6 +64,7 @@ It does two separate jobs:
 | Allen & Heath | Qu, SQ | — | **Not implemented.** The SQ's Dante card registers the same `AllenHth` namespace as the DT expanders, so the DT codec is the likeliest route, pending a capture |
 | Aphex | 1788A | MIDI SysEx | **Codec only, no transport.** Built from Aphex's published command table; how the SysEx reaches the unit's Ethernet port isn't documented |
 | Yamaha | Rio, Tio | `MBC` over Audinate ConMon | **Adapter written, not usable yet.** Gain, +48 V and metering, from a wire format proven on a real Rio3224-D2. Never run against a device, and no plugin loads it, so the bridge can't drive a Rio yet |
+| Yamaha | Rio3224-D2, **emulated** (the bridge is the stagebox) | A Dante device (mDNS, ARC, ConMon), then `MBC` from the stagebox's side | **Built from a capture, never run against a console.** Kind `yamaha-rio-emulated`: a virtual Rio for a CL or QL to mount and control, 32 channels of gain and +48 V. No audio. See [dante-emulation.md](dante-emulation.md) |
 | Yamaha | CL, QL | `MBC` over Audinate ConMon | **Partial, and not usable yet.** A QL/CL is the controlling side of the captured protocol, and the Rio adapter addresses it too, so it's waiting on the same plugin. Driving a console's own local head amps was never seen on the wire |
 | Yamaha | DM7 | — | **Not implemented** — no public spec |
 
