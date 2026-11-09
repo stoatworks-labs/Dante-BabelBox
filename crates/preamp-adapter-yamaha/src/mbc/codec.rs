@@ -53,6 +53,33 @@ pub const CHECKSUM_TARGET: u8 = 0x3F;
 /// be hard-coded - copy them from the equivalent captured message.
 pub const FLAG_FROM_DEVICE: u8 = 0x20;
 
+/// Bit 0x10: sent by a device unprompted, to everyone (a power-up
+/// announcement, the metering stream). Never seen from the console.
+pub const FLAG_UNSOLICITED: u8 = 0x10;
+
+/// The low nibble of the flags byte says what kind of message this is.
+/// Read off every exchange in the pairing capture: the console's nibble
+/// comes back unchanged in the device's answer, with [`FLAG_FROM_DEVICE`]
+/// added.
+pub const FLAG_KIND_MASK: u8 = 0x0f;
+/// A write: the console sends data, the device applies it and sends it back.
+pub const KIND_WRITE: u8 = 0x00;
+/// A read: the console sends a count and no data, the device sends the data.
+pub const KIND_READ: u8 = 0x01;
+/// The `0x0731` arrays the console pushes and the device hands straight back.
+pub const KIND_SURFACE: u8 = 0x02;
+/// Metering: the console asks, the device acknowledges and starts streaming.
+pub const KIND_METER: u8 = 0x03;
+
+/// The `len` field of a read request: four header bytes, the five-byte
+/// body prefix and the checksum. A device answering a read sends this same
+/// value back, however much data it appends (see [`MbcBlock::encode_read_reply`]).
+pub const READ_REQUEST_LEN: u16 = 10;
+
+/// `ff:ff:ff:ff:ff:ff`: to everyone. The console's device poll and a
+/// device's own announcements are addressed this way.
+pub const MAC_BROADCAST: [u8; 6] = [0xff; 6];
+
 /// Flags observed on the 32-channel head-amp broadcast, console -> device.
 /// This is the value on the frame the Rio3224-D2 accepted.
 pub const FLAGS_HEADAMP_BROADCAST: u8 = 0x00;
@@ -72,6 +99,8 @@ const LEN_ORIGIN: usize = 20;
 const BODY_PREFIX_LEN: usize = 5; // subop + count + start_index
 const ENVELOPE_LEN: usize = 42;
 const VENDOR_LEN_OFFSET: usize = 40;
+/// Number of MBC blocks in the packet.
+const BLOCK_COUNT_OFFSET: usize = 36;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MbcError {
@@ -212,11 +241,32 @@ impl MbcBlock {
         self.as_u8()
     }
 
+    /// The kind of message, from the low nibble of the flags byte.
+    pub fn kind(&self) -> u8 {
+        self.flags & FLAG_KIND_MASK
+    }
+
     /// Serializes the block, appending a correct checksum.
     pub fn encode(&self) -> Vec<u8> {
         let body_len = BODY_PREFIX_LEN + self.data.len() + 1; // + checksum
         let len = (BLOCK_HEADER_LEN - LEN_ORIGIN + body_len) as u16;
+        self.encode_declaring(len)
+    }
 
+    /// Serializes the block the way a device answers a read: the `len`
+    /// field says [`READ_REQUEST_LEN`], the request's own length, and the
+    /// data follows regardless. Every read reply in the capture is built
+    /// like this, and it is why the decoder cannot trust `len`.
+    ///
+    /// The console reads these replies happily, so a device has to send
+    /// them this way: whether a console would accept a reply with an honest
+    /// `len` has never been tried.
+    pub fn encode_read_reply(&self) -> Vec<u8> {
+        self.encode_declaring(READ_REQUEST_LEN)
+    }
+
+    fn encode_declaring(&self, len: u16) -> Vec<u8> {
+        let body_len = BODY_PREFIX_LEN + self.data.len() + 1; // + checksum
         let mut out = Vec::with_capacity(BLOCK_HEADER_LEN + body_len);
         out.extend_from_slice(MBC_MAGIC);
         out.push(self.version);
@@ -276,20 +326,30 @@ pub fn checksum(block_without_checksum: &[u8]) -> u8 {
 
 /// Extracts every MBC block from a ConMon UDP payload.
 ///
-/// A packet can carry more than one block. Each candidate runs from its
-/// `MBC` magic to whichever end validates: the next block's magic, the
-/// boundary the `len` field implies, or the end of the vendor payload.
-/// Blocks that validate under none of those are skipped rather than
-/// guessed at.
+/// A packet can carry more than one block. The envelope says how many (the
+/// word at offset 36) and leads each with its own length, so the payload is
+/// first cut into those pieces. Within a piece, a block runs from its `MBC`
+/// magic to whichever end validates: the next block's magic, the boundary
+/// the `len` field implies, or the end of the piece. Blocks that validate
+/// under none of those are skipped rather than guessed at.
+///
+/// An earlier version read only the first length and so saw only the first
+/// block of a packet. Nothing it reported was wrong, but it never saw the
+/// second block of the Rio's power-up announcements, or of the console's
+/// paired reads.
 pub fn blocks_in_conmon_payload(payload: &[u8]) -> Vec<MbcBlock> {
-    let region_end = vendor_payload_end(payload).unwrap_or(payload.len());
-    let region = &payload[..region_end.min(payload.len())];
+    let mut out = Vec::new();
+    for region in vendor_regions(payload) {
+        blocks_in_region(region, &mut out);
+    }
+    out
+}
 
+fn blocks_in_region(region: &[u8], out: &mut Vec<MbcBlock>) {
     let starts: Vec<usize> = (0..region.len().saturating_sub(MBC_MAGIC.len()))
         .filter(|&i| &region[i..i + MBC_MAGIC.len()] == MBC_MAGIC)
         .collect();
 
-    let mut out = Vec::new();
     for (n, &start) in starts.iter().enumerate() {
         let hard_end = starts.get(n + 1).copied().unwrap_or(region.len());
         let slice = &region[start..hard_end];
@@ -314,7 +374,6 @@ pub fn blocks_in_conmon_payload(payload: &[u8]) -> Vec<MbcBlock> {
             out.push(block);
         }
     }
-    out
 }
 
 /// Block length implied by the block's own `len` field.
@@ -326,21 +385,44 @@ fn declared_block_len(slice: &[u8]) -> Option<usize> {
     Some(LEN_ORIGIN + len)
 }
 
-/// End offset of the vendor payload, from the ConMon envelope's
-/// offset-40 field: high byte is the block length **plus one**, low byte
-/// is normally `0xC0`.
+/// Cuts a ConMon payload into its vendor pieces, one per block the
+/// envelope announces.
 ///
-/// The spec calls the low byte invariant; across the captures it is `0xC0`
-/// on 3 889 frames but `0x00` on 15 and `0x80` on 3, so this reads the
-/// high byte and does not require the low byte to match.
-fn vendor_payload_end(payload: &[u8]) -> Option<usize> {
+/// From offset 40 each piece is led by two bytes: the piece's length
+/// **plus one**, then a byte that is normally `0xC0`. The spec calls that
+/// second byte invariant; across the captures it is `0xC0` on 3 889 frames
+/// but `0x00` on 15 and `0x80` on 3, so it is not required to match.
+///
+/// If the envelope does not add up (no count, or a length that runs past
+/// the datagram), everything after the envelope is returned as one piece
+/// and the magic scan sorts it out. That keeps a packet readable when only
+/// its framing is off.
+fn vendor_regions(payload: &[u8]) -> Vec<&[u8]> {
+    let whole = || vec![payload.get(ENVELOPE_LEN..).unwrap_or(payload)];
     if payload.len() < ENVELOPE_LEN {
-        return None;
+        return vec![payload];
     }
-    let vendor = u16::from_be_bytes([payload[VENDOR_LEN_OFFSET], payload[VENDOR_LEN_OFFSET + 1]]);
-    let block_len = (vendor >> 8).checked_sub(1)? as usize;
-    let end = ENVELOPE_LEN.checked_add(block_len)?;
-    (end <= payload.len()).then_some(end)
+    let count = u16::from_be_bytes([payload[BLOCK_COUNT_OFFSET], payload[BLOCK_COUNT_OFFSET + 1]]) as usize;
+    if count == 0 {
+        return whole();
+    }
+    let mut regions = Vec::with_capacity(count);
+    let mut offset = VENDOR_LEN_OFFSET;
+    for _ in 0..count {
+        let Some(&length_plus_one) = payload.get(offset) else {
+            return whole();
+        };
+        let Some(length) = (length_plus_one as usize).checked_sub(1) else {
+            return whole();
+        };
+        let start = offset + 2;
+        let Some(region) = payload.get(start..start + length) else {
+            return whole();
+        };
+        regions.push(region);
+        offset = start + length;
+    }
+    regions
 }
 
 /// Builds the Audinate ConMon envelope around an MBC block.
@@ -355,7 +437,23 @@ pub fn wrap_conmon(
     sender_eui64: [u8; 8],
     message_class: u32,
 ) -> Vec<u8> {
-    let mut out = Vec::with_capacity(ENVELOPE_LEN + block.len());
+    wrap_conmon_blocks(&[block], sequence, sender_eui64, message_class)
+}
+
+/// Builds one ConMon packet carrying several MBC blocks.
+///
+/// The word at offset 36 is the number of blocks, and each block is led by
+/// its own two-byte length (`len + 1`, then `0xC0`). Both devices do this:
+/// the Rio's power-up announcement puts two blocks in a packet, and so does
+/// the console's first pair of reads.
+pub fn wrap_conmon_blocks(
+    blocks: &[&[u8]],
+    sequence: u16,
+    sender_eui64: [u8; 8],
+    message_class: u32,
+) -> Vec<u8> {
+    let payload: usize = blocks.iter().map(|b| b.len() + 2).sum();
+    let mut out = Vec::with_capacity(VENDOR_LEN_OFFSET + payload);
     out.extend_from_slice(&0xffffu16.to_be_bytes()); // magic for 8705/8800
     out.extend_from_slice(&[0, 0]); // total length, patched below
     out.extend_from_slice(&sequence.to_be_bytes());
@@ -365,12 +463,16 @@ pub fn wrap_conmon(
     out.extend_from_slice(&message_class.to_be_bytes());
     out.extend_from_slice(&[0, 0, 0, 0]);
     out.extend_from_slice(&sequence.to_be_bytes());
-    out.extend_from_slice(&[0x00, 0x10, 0x00, 0x01, 0x00, 0x00]);
-    // The trap: high byte is len + 1, low byte 0xC0. Get this wrong and
-    // the device ignores the packet without complaint.
-    let vendor = ((block.len() as u16 + 1) << 8) | 0xC0;
-    out.extend_from_slice(&vendor.to_be_bytes());
-    out.extend_from_slice(block);
+    out.extend_from_slice(&[0x00, 0x10]);
+    out.extend_from_slice(&(blocks.len() as u16).to_be_bytes());
+    out.extend_from_slice(&[0x00, 0x00]);
+    for block in blocks {
+        // The trap: high byte is len + 1, low byte 0xC0. Get this wrong and
+        // the device ignores the packet without complaint.
+        let vendor = ((block.len() as u16 + 1) << 8) | 0xC0;
+        out.extend_from_slice(&vendor.to_be_bytes());
+        out.extend_from_slice(block);
+    }
 
     let total = out.len() as u16;
     out[2..4].copy_from_slice(&total.to_be_bytes());
@@ -657,6 +759,52 @@ fda8fda8fda8fda8fda8fda8fda8fda8fda8fda8fda8fda8fda8fda8fda8fda8fda8fda8fda8fda8
         };
         assert_eq!(block.metering_raw().unwrap()[0], 31);
         assert!(block.gain_db().is_none());
+    }
+
+    /// Frame 810: the Rio3224-D2's power-up announcement, two blocks in one
+    /// packet (its Dante name, then `0711/08`).
+    const RIO_ANNOUNCE_FRAME: &str = "ffff008900000000001dc1fffe25df04417564696e617465073110020000000000000010000200003fc0\
+4d424301002a001dc125df04ffffffffffff00002a1007110500010000593030342d59616d6168612d52696f333232342d44322d3235646630340000001820c0\
+4d424301000b001dc125df04ffffffffffff00000b10071108000100000243";
+
+    /// Frame 929: the Rio's answer to the console's device poll. `len` says
+    /// 10; fifty bytes of unit id, model and Dante name follow.
+    const RIO_POLL_REPLY_FRAME: &str = "ffff007a00040000001dc1fffe25df04417564696e6174650731100200000000000400100001000051c0\
+4d424301000a001dc125df0400a0dee0cef600000a21071f0600010000000452696f333232342d4432000000000000\
+593030342d59616d6168612d52696f333232342d44322d32356466303400000074";
+
+    #[test]
+    fn two_blocks_are_packed_the_way_the_rio_packed_them() {
+        let payload = hex(RIO_ANNOUNCE_FRAME);
+        let blocks = blocks_in_conmon_payload(&payload);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!((blocks[0].opcode, blocks[0].subop), (0x0711, 0x05));
+        assert_eq!((blocks[1].opcode, blocks[1].subop), (0x0711, 0x08));
+        assert_eq!(blocks[0].flags, FLAG_UNSOLICITED);
+        assert_eq!(blocks[0].dst_mac, MAC_BROADCAST);
+
+        let encoded: Vec<Vec<u8>> = blocks.iter().map(MbcBlock::encode).collect();
+        let refs: Vec<&[u8]> = encoded.iter().map(Vec::as_slice).collect();
+        let rebuilt = wrap_conmon_blocks(&refs, 0, hex("001dc1fffe25df04").try_into().unwrap(), 0x07311002);
+        assert_eq!(rebuilt, payload, "the whole packet, block count and both lengths included");
+    }
+
+    #[test]
+    fn a_read_reply_keeps_the_requests_len_and_appends_the_data() {
+        let payload = hex(RIO_POLL_REPLY_FRAME);
+        let block = &blocks_in_conmon_payload(&payload)[0];
+        assert_eq!(block.flags, FLAG_FROM_DEVICE | KIND_READ);
+        assert_eq!(block.kind(), KIND_READ);
+        assert_eq!(block.data.len(), 50);
+
+        let rebuilt = wrap_conmon(
+            &block.encode_read_reply(),
+            4,
+            hex("001dc1fffe25df04").try_into().unwrap(),
+            0x07311002,
+        );
+        assert_eq!(rebuilt, payload, "byte for byte what the Rio sent");
+        assert_ne!(block.encode(), block.encode_read_reply(), "an honest len is a different packet");
     }
 
     #[test]
