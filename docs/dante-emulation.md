@@ -177,7 +177,8 @@ the whole session (`tcpdump -i <interface> -w bench.pcap 'not (udp portrange
 
 1. **Does the console see it?** With the virtual Rio running, does it appear
    in the console's Dante device list, and in Dante Controller? Watch the
-   runner for "ARC request with no known reply".
+   runner for "ARC request with no known reply". (Dante Controller has to be
+   on a different machine from the virtual Rio; see "Tried" below.)
 2. **Does the console mount it?** Mount the unit id. Does the console show
    the Rio's head amps, or "not found" / "conflict"? Watch for the poll being
    answered and the console's reads following.
@@ -197,6 +198,34 @@ Also worth an afternoon with a console and a real Rio, because it would let
 the emulated one drive more than gain and +48 V: change HPF, HPF frequency,
 polarity and pad on one input, one at a time, with a capture running. Each
 will move exactly one of the arrays above.
+
+### Tried: Dante Controller on the same Mac (2026-11-09)
+
+Dante Controller 4.18.1, on the machine that was running the virtual Rio.
+It is the only real Audinate controller this has met, and it did not get as
+far as a test:
+
+- **It finds the device.** Its status bar counted one device and its event
+  log named it. The mDNS records are good enough for Audinate's own
+  discovery.
+- **It asked it nothing.** No ARC query, no ConMon registration and no status
+  query reached the virtual Rio, and it never appeared in the routing grid.
+  With the Rio on Dante Controller's own address there was no error at all;
+  the likely reason (inferred, not confirmed) is that Dante software takes a
+  device at its own address to belong to the local Dante stack. With the Rio
+  on a second local address, advertised through Bonjour, the event log said
+  why: the device's address "does not match the subnet configuration of the
+  local Dante interface".
+- **It only uses real network ports.** It would not take a virtual link
+  (`feth`), so this ran on a physical port.
+
+So a Dante Controller test needs the virtual Rio on a **different machine**
+on the same subnet. It will not get far there either, yet: Dante Controller
+speaks ARC version `0x2808` and asks for `0x2002`, `0x2320`, `0x2400`,
+`0x2600`, `0x3400` and `0x3600`, none of which the QL1 asked the Rio, so
+none is answered. `yamaha-dm3/dm3-dante-cmc-arc.pcapng` in `dante-captures`
+has a real Dante module's answers to all of them, which is where support for
+Dante Controller would start.
 
 ## 6. Audio
 
