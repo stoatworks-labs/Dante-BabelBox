@@ -32,6 +32,7 @@ pub const VERSION_STATUS: u16 = 0x0734;
 pub const VERSION_PRODUCT: u16 = 0x0731;
 
 pub const TYPE_INTERFACE: u16 = 0x0011;
+pub const TYPE_SWITCH: u16 = 0x0014;
 pub const TYPE_CLOCK: u16 = 0x0020;
 pub const TYPE_VERSIONS: u16 = 0x0060;
 pub const TYPE_SAMPLE_RATE: u16 = 0x0080;
@@ -49,6 +50,9 @@ pub const TYPE_1009: u16 = 0x1009;
 pub fn status_for_query(query_type: u16) -> Option<u16> {
     Some(match query_type {
         0x0013 => TYPE_INTERFACE,
+        // Dante Controller's, not the console's: seen answered this way by
+        // a DM3's module. The body sent is the Rio's own, from its start-up.
+        0x0015 => TYPE_SWITCH,
         0x0021 => TYPE_CLOCK,
         0x0061 => TYPE_VERSIONS,
         0x0081 => TYPE_SAMPLE_RATE,
@@ -62,7 +66,7 @@ pub fn status_for_query(query_type: u16) -> Option<u16> {
 }
 
 /// What a device publishes unprompted when it comes up, in the Rio's order.
-pub const BOOT_ANNOUNCE: [u16; 9] = [
+pub const BOOT_ANNOUNCE: [u16; 10] = [
     TYPE_1009,
     TYPE_CLOCK,
     TYPE_VERSIONS,
@@ -72,6 +76,7 @@ pub const BOOT_ANNOUNCE: [u16; 9] = [
     TYPE_ENCODING,
     TYPE_MAKE_MODEL,
     TYPE_1007,
+    TYPE_SWITCH,
 ];
 
 /// What a device keeps repeating. The Rio republished its clock status every
@@ -123,6 +128,16 @@ const STATUS_1007: &str = "0000000000000000";
 
 /// Frame 558.
 const STATUS_1009: &str = "0000000000000001000000100000000000000000";
+
+/// Frame 624. The module's switch configuration: the two names in it are
+/// its modes, "Switched" and "Redundant". Sent as captured.
+const SWITCH: &str = "0000000000020018009400040000007f0001000100010000537769746368656400000000000000000000000000000000\
+        000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\
+        000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\
+        00000000000000000000002b00000000000000000000000000020000526564756e64616e740000000000000000000000\
+        000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\
+        000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\
+        00000000000000000000000000000029000000220000000000000000";
 
 /// Frame 599. The network interface: link speed (1000), MAC, address and
 /// netmask.
@@ -189,6 +204,7 @@ pub fn body(
         TYPE_0084 => hex(STATUS_0084),
         TYPE_1007 => hex(STATUS_1007),
         TYPE_1009 => hex(STATUS_1009),
+        TYPE_SWITCH => hex(SWITCH),
         TYPE_INTERFACE => {
             let mut b = hex(INTERFACE);
             patch(&mut b, INTERFACE_MAC_AT, &identity.mac);
@@ -337,6 +353,16 @@ mod tests {
     }
 
     #[test]
+    fn switch_status_is_the_rios_own_344_byte_frame() {
+        let (identity, persona) = rio();
+        let built = message(TYPE_SWITCH, 0x001b, &identity, &persona, 24).unwrap();
+        assert_eq!(built.len(), 344);
+        assert_eq!(&built[..32], &hex("ffff0158001b0000001dc1fffe25df04417564696e6174650734001400000000")[..]);
+        assert_eq!(&built[52..60], b"Switched");
+        assert_eq!(&built[200..209], b"Redundant");
+    }
+
+    #[test]
     fn heartbeat_rebuilds_the_captured_frame() {
         let (identity, _) = rio();
         assert_eq!(heartbeat(0x0007, 4, &identity), hex(RIO_HEARTBEAT_FRAME));
@@ -388,7 +414,9 @@ mod tests {
 
     #[test]
     fn every_query_the_console_sent_has_an_answer() {
-        for query in [0x0013, 0x0021, 0x0061, 0x0081, 0x0083, 0x0085, 0x00c1, 0x1006, 0x1008] {
+        // The console's nine, and the one more Dante Controller asks that a
+        // Rio is known to have an answer for.
+        for query in [0x0013, 0x0021, 0x0061, 0x0081, 0x0083, 0x0085, 0x00c1, 0x1006, 0x1008, 0x0015] {
             let status = status_for_query(query).expect("a status type");
             let (identity, persona) = rio();
             assert!(body(status, &identity, &persona, 24).is_some());

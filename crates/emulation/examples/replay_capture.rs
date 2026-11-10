@@ -9,6 +9,7 @@
 //! ```text
 //! cargo run -p dante-babelbox-emulation --example replay_capture -- \
 //!     <capture.pcap> [--device IP] [--name NAME] [--mac MAC] [--cold] [--show-differences]
+//!     [--tx N] [--rx N] [--rate HZ] [--property ID=HEX]...
 //! ```
 //!
 //! With no options it expects the reference capture
@@ -26,6 +27,23 @@
 //! A reply that still differs is not necessarily a fault. A virtual device
 //! has no audio, so anything that reports a live flow differs, and the
 //! summary says which those are.
+//!
+//! ## A capture of another device
+//!
+//! The reply *layouts* can be checked against any Dante device, not only a
+//! Rio, by shaping the emulator like it: `--tx`, `--rx` and `--rate` set its
+//! channel counts and sample rate, and `--property 8205=0007a120` puts a
+//! value in an out-of-line property. For Dante Controller asking a DM3's
+//! module (`yamaha-dm3/dm3-dante-cmc-arc.pcapng`):
+//!
+//! ```text
+//! ... dm3-dante-cmc-arc.pcapng --device 169.254.237.144 --name Y001-Yamaha-DM3-a436af \
+//!     --mac ac:44:f2:a4:36:af --tx 16 --rx 16 --rate 96000 --property 8205=0007a120
+//! ```
+//!
+//! The channel and flow listings then compare byte for byte. Device info,
+//! channel counts and the property values do not, and are not meant to:
+//! they describe a different Dante module (a Broadway, not a Brooklyn 3).
 
 use std::collections::BTreeMap;
 use std::env;
@@ -78,9 +96,43 @@ fn main() -> ExitCode {
     let mut name = "Y004-Yamaha-Rio3224-D2-25df04".to_string();
     let mut mac = "00:1d:c1:25:df:04".to_string();
     let (mut cold, mut show) = (false, false);
+    let mut persona = Persona::yamaha_rio3224_d2();
+    let mut properties: Vec<(u16, Vec<u8>)> = Vec::new();
+    let mut another_device = false;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
+        let mut number = |what: &str| -> Option<u32> {
+            let value = args.next().and_then(|v| v.parse().ok());
+            if value.is_none() {
+                eprintln!("{what} needs a number");
+            }
+            value
+        };
         match arg.as_str() {
+            "--tx" | "--rx" | "--rate" => {
+                let Some(value) = number(&arg) else { return ExitCode::FAILURE };
+                match arg.as_str() {
+                    "--tx" => persona.tx_channels = value as u16,
+                    "--rx" => persona.rx_channels = value as u16,
+                    _ => persona.sample_rate = value,
+                }
+                another_device = true;
+            }
+            "--property" => {
+                let parsed = args.next().and_then(|text| {
+                    let (id, value) = text.split_once('=')?;
+                    let id = u16::from_str_radix(id, 16).ok()?;
+                    let bytes: Option<Vec<u8>> = (0..value.len() / 2)
+                        .map(|i| u8::from_str_radix(value.get(i * 2..i * 2 + 2)?, 16).ok())
+                        .collect();
+                    Some((id, bytes?))
+                });
+                let Some(property) = parsed else {
+                    eprintln!("--property needs ID=HEX, for example 8205=0007a120");
+                    return ExitCode::FAILURE;
+                };
+                properties.push(property);
+            }
             "--device" => device = args.next().unwrap_or_default(),
             "--name" => name = args.next().unwrap_or_default(),
             "--mac" => mac = args.next().unwrap_or_default(),
@@ -107,7 +159,6 @@ fn main() -> ExitCode {
         }
     };
     let identity = DeviceIdentity { name, mac, ip };
-    let persona = Persona::yamaha_rio3224_d2();
 
     let datagrams = match fs::read(&path).map_err(|e| e.to_string()).and_then(|b| capture::datagrams(&b)) {
         Ok(d) => d,
@@ -120,6 +171,9 @@ fn main() -> ExitCode {
     println!("{} UDP datagrams; emulating {} at {}", datagrams.len(), identity.name, identity.ip);
 
     let mut state = ArcState::new(&persona);
+    for (id, value) in &properties {
+        state.restore_property(*id, value);
+    }
     if !cold {
         let restored = restore_subscriptions(&datagrams, &identity, &mut state);
         println!("started with the {restored} subscriptions the captured device already held");
@@ -181,16 +235,26 @@ fn main() -> ExitCode {
     }
 
     report("ARC (UDP 4440)", &arc_tally, show, |opcode| match opcode {
+        arc::OP_CHANNEL_COUNT | arc::OP_DEVICE_INFO | arc::OP_PROPERTY_GET if another_device => {
+            "describes the captured device's own Dante module, which is not a Rio's"
+        }
         arc::OP_RX_CHANNELS => "subscription state the device changed by itself as audio connected",
         arc::OP_TX_FLOWS | arc::OP_RX_FLOWS => "the device had audio flows; a virtual one has none",
         _ => "",
     });
-    report("ConMon registration (UDP 8800)", &cmc_tally, show, |_| "");
+    report("ConMon registration (UDP 8800)", &cmc_tally, show, |_| {
+        if another_device {
+            "this module writes its device id as MAC + 0000; a Rio's inserts ff:fe"
+        } else {
+            ""
+        }
+    });
     report(
         "ConMon status queries (UDP 8700 in, 8702 out; bodies compared)",
         &status_tally,
         show,
         |query| match query {
+            _ if another_device => "status bodies are a Rio's module's; this device has another",
             0x0021 => "clock status: the device had found a leader; a virtual one runs no clock",
             _ => "",
         },

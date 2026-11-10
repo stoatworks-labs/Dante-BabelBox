@@ -11,7 +11,7 @@
 //!      4     2  transaction id, echoed
 //!      6     2  opcode
 //!      8     2  result: 0 in a request, 1 in the answer
-//!     10     2  zero
+//!     10     2  the requester's ConMon process id; zero in the answer
 //!     12     8  sender's device id
 //!     20     .  body
 //! ```
@@ -79,6 +79,9 @@ pub fn respond(request: &[u8], identity: &DeviceIdentity, control_port: u16) -> 
     let opcode = u16_at(request, 6)?;
     let mut packet = request[..HEADER_LEN].to_vec();
     packet[8..10].copy_from_slice(&1u16.to_be_bytes());
+    // The console left this word zero; Dante Controller puts its process
+    // id in it, and a real module answers with it cleared.
+    packet[10..12].fill(0);
     packet[12..20].copy_from_slice(&identity.eui64());
 
     match opcode {
@@ -159,6 +162,17 @@ mod tests {
                 address: "169.254.177.13:8702".parse().unwrap(),
             })
         );
+    }
+
+    #[test]
+    fn the_requesters_process_id_is_not_echoed() {
+        // Dante Controller's form of the "where is your control port?"
+        // request (frame 1 of `yamaha-dm3/dm3-dante-cmc-arc.pcapng`, with the
+        // requester's id replaced): bytes 10..12 carry its process id. The
+        // DM3's module answered with that word zero.
+        let request = hex("120000140000100100001b9c02aabbccddee0000");
+        let reply = respond(&request, &rio(), 8700).unwrap();
+        assert_eq!(reply.packet, hex("120000200000100100010000001dc1fffe25df0400010000a9fec1e521fc0000"));
     }
 
     #[test]

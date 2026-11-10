@@ -245,3 +245,27 @@ console will ask, or what a console does when a subscription never connects. Als
 The daemon now deregisters every device on Ctrl-C. That is what withdraws an emulated device's
 mDNS records (checked: `dns-sd -B` shows the `Rmv` within a second); before, adapters were just
 dropped with the process.
+
+**2026-11-10 — Dante Controller: tried on the same Mac, then given its own answers.**
+Two things, both in `docs/dante-emulation.md`.
+
+*The same-machine test can't work.* Dante Controller 4.18.1 finds the virtual Rio (it counts the
+device and names it in its event log) and then sends it nothing. On its own address the device is
+ignored without a word; on a second local address the event log says the address "does not match
+the subnet configuration of the local Dante interface". It also refuses anything that is not a
+real network port, so the isolated `feth` link is no use to it. A Dante Controller test needs the
+emulator on another machine.
+
+*Dante Controller asks different questions from a console.* ARC version `0x2808`, and channel
+listings in a second-generation layout (`0x2002`, `0x2400`, `0x3400`). The only capture of those
+is Dante Controller with the **DM3's** module, so the emulator's answers are that module's
+layouts with the Rio's content: 15 of 15 listings byte-identical when the emulator is shaped
+like the DM3. No capture of Dante Controller with a Rio exists, and that is the caveat to keep.
+Three smaller facts from the same capture:
+
+- A module answers a property it does not have with a zero id and the asked id as the value.
+- A reply names its own version: the DM3's module answered one `0x2808` request (`0x2204`) as
+  `0x2801`, and refused another (`0x2320`) with status `0x0030` and no body.
+- The ConMon registration reply must clear the requester's process-id word (bytes 10..12). The
+  console leaves it zero, so the Rio capture never showed it; Dante Controller fills it in. The
+  emulator was echoing it until the DM3 replay caught it.

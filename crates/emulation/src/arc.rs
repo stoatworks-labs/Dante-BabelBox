@@ -18,6 +18,15 @@
 //!   chris-ritsen/network-audio-controller's `netaudio-core` (Unlicense):
 //!   <https://github.com/chris-ritsen/network-audio-controller>.
 //!
+//! - `yamaha-dm3/dm3-dante-cmc-arc.pcapng` (same repo): Dante Controller
+//!   asking a DM3's Dante module in protocol version `0x2808`. Dante
+//!   Controller asks for channel lists in a second, richer layout (`0x2002`,
+//!   `0x2400`, `0x3400`) that the console never used. Those layouts are
+//!   built here as that module built them. **No capture exists of Dante
+//!   Controller asking a Rio**, so for these replies the layout is one real
+//!   module's and the content is the persona's; whether a Rio answers them
+//!   the same way, or at all, is not known.
+//!
 //! ## What is and is not understood
 //!
 //! Names, counts, pointers and the paging of channel lists are understood
@@ -47,11 +56,18 @@ pub const OP_1F11: u16 = 0x1f11;
 pub const OP_TX_CHANNELS: u16 = 0x2000;
 pub const OP_TX_LABELS: u16 = 0x2010;
 pub const OP_2032: u16 = 0x2032;
+pub const OP_TX_CHANNELS_V2: u16 = 0x2002;
 pub const OP_TX_FLOWS: u16 = 0x2200;
+pub const OP_2204: u16 = 0x2204;
+pub const OP_2320: u16 = 0x2320;
+pub const OP_TX_CHANNELS_FULL: u16 = 0x2400;
+pub const OP_TX_FLOWS_V2: u16 = 0x2600;
 pub const OP_RX_CHANNELS: u16 = 0x3000;
 pub const OP_SUBSCRIBE: u16 = 0x3010;
 pub const OP_UNSUBSCRIBE: u16 = 0x3014;
 pub const OP_RX_FLOWS: u16 = 0x3200;
+pub const OP_RX_CHANNELS_V2: u16 = 0x3400;
+pub const OP_RX_FLOWS_V2: u16 = 0x3600;
 pub const OP_3210: u16 = 0x3210;
 pub const OP_3300: u16 = 0x3300;
 
@@ -61,6 +77,9 @@ pub const STATUS_OK: u16 = 0x0001;
 /// answered the first page of its 24 receive channels with this and the
 /// second with [`STATUS_OK`].
 pub const STATUS_MORE: u16 = 0x8112;
+/// Reply status the DM3's module gave, with no body, to the one request it
+/// would not answer (`0x2320`). Read as "no", and used only there.
+pub const STATUS_REFUSED: u16 = 0x0030;
 
 /// A reply's header: version, length, transaction, opcode, status.
 pub const REPLY_HEADER_LEN: usize = 10;
@@ -69,6 +88,10 @@ pub const REPLY_HEADER_LEN: usize = 10;
 const REQUEST_BODY: usize = 8;
 const TX_PAGE: u16 = 32;
 const RX_PAGE: u16 = 16;
+/// Channels to a page in the second-generation listings. Dante Controller
+/// asked for 16 at a time, and 32 of the larger records would not fit one
+/// datagram.
+const V2_PAGE: u16 = 16;
 const TX_RECORD: usize = 8;
 const RX_RECORD: usize = 20;
 
@@ -132,6 +155,28 @@ impl ArcState {
             (0x8060, blob("ef450000")),
             (0x0022, Property::Inline(0x0001)),
             (0x0063, Property::Inline(0x0001)),
+            // The console never asked the Rio for the rest of its property
+            // list. Dante Controller asks for all of it, so the gaps are
+            // filled from the one module that was seen to answer in full, a
+            // DM3's. They are that module's values, not a Rio's; where both
+            // devices were asked the same property they agreed on all but
+            // one. 0x8020 is the sample rate.
+            (0x8020, Property::Blob(persona.sample_rate.to_be_bytes().to_vec())),
+            (0x0023, Property::Inline(0x0000)),
+            (0x0024, Property::Inline(0x0001)),
+            (0x0062, Property::Inline(0x0001)),
+            (0x020a, Property::Inline(0x0000)),
+            (0x020b, Property::Inline(0x0000)),
+            (0x0212, Property::Inline(0x0030)),
+            (0x0213, Property::Inline(0x0002)),
+            (0x0214, Property::Inline(0x0040)),
+            (0x0222, Property::Inline(0x138c)),
+            (0x8321, blob("001e8480")),
+            (0x0312, Property::Inline(0x0030)),
+            (0x83f0, blob("0000000500000000")),
+            (0x0601, Property::Inline(0x0000)),
+            (0x0309, Property::Inline(0x0003)),
+            (0x0209, Property::Inline(0x0001)),
         ]);
         Self {
             subscriptions: vec![None; persona.rx_channels as usize],
@@ -156,6 +201,21 @@ impl ArcState {
     pub fn restore_subscription(&mut self, channel: u16, subscription: Subscription, state_word: u32) {
         if let Some(slot) = channel.checked_sub(1).and_then(|i| self.subscriptions.get_mut(i as usize)) {
             *slot = Some((subscription, state_word));
+        }
+    }
+
+    /// Puts raw bytes into an out-of-line property, as if the device had
+    /// come up holding them; for the capture replay, like
+    /// [`restore_subscription`](Self::restore_subscription).
+    pub fn restore_property(&mut self, id: u16, value: &[u8]) {
+        self.properties.insert(id, Property::Blob(value.to_vec()));
+    }
+
+    /// An out-of-line property's bytes.
+    fn blob(&self, id: u16) -> &[u8] {
+        match self.properties.get(&id) {
+            Some(Property::Blob(bytes)) => bytes,
+            _ => &[],
         }
     }
 
@@ -193,8 +253,14 @@ struct Reply {
 
 impl Reply {
     fn new(request: &[u8], status: u16) -> Self {
-        let mut bytes = Vec::with_capacity(512);
-        bytes.extend_from_slice(&request[0..2]); // protocol version, echoed
+        Self::in_version([request[0], request[1]], request, status) // version echoed
+    }
+
+    /// A reply that names its own protocol version instead of echoing the
+    /// request's.
+    fn in_version(version: [u8; 2], request: &[u8], status: u16) -> Self {
+        let mut bytes = Vec::with_capacity(1024);
+        bytes.extend_from_slice(&version);
         bytes.extend_from_slice(&[0, 0]); // length, set in finish()
         bytes.extend_from_slice(&request[4..6]); // transaction id
         bytes.extend_from_slice(&request[6..8]); // opcode
@@ -291,11 +357,33 @@ pub fn respond(
         OP_PROPERTY_SET => property_set(request, state)?,
         OP_TX_CHANNELS => tx_channels(request, persona, state)?,
         OP_TX_LABELS => {
-            // No channel has been given a label: 32 empty 8-byte slots.
+            // No channel has been given a label: as many empty 8-byte slots
+            // as were asked for (32 by the console, 16 by Dante Controller).
+            let asked = u16_at(request, REQUEST_BODY + 6).unwrap_or(0);
+            let slots = if asked == 0 { TX_PAGE } else { asked.min(TX_PAGE) };
             let mut reply = Reply::new(request, STATUS_OK);
-            reply.put(&[TX_PAGE as u8, 0]).zeros(TX_PAGE as usize * 8);
+            reply.put(&[slots as u8, 0]).zeros(slots as usize * 8);
             reply.finish()
         }
+        OP_TX_CHANNELS_V2 => tx_channels_v2(request, persona, state)?,
+        OP_TX_CHANNELS_FULL => channels_full(request, persona, state, Direction::Tx)?,
+        OP_RX_CHANNELS_V2 => channels_full(request, persona, state, Direction::Rx)?,
+        OP_TX_FLOWS_V2 | OP_RX_FLOWS_V2 => {
+            // The second-generation flow lists: sixteen slots, none in use,
+            // which is what the DM3's module answered for both.
+            let mut reply = Reply::new(request, STATUS_OK);
+            reply.zeros(6).put(&[0x10, 0]).zeros(32);
+            reply.finish()
+        }
+        OP_2204 => {
+            // As the DM3's module answered it, version word included: it
+            // sent this one reply as 0x2801 to a 0x2808 request.
+            let mut reply = Reply::in_version([0x28, 0x01], request, STATUS_OK);
+            reply.put(&hex("0400 0000 0000 0000 0000"));
+            reply.finish()
+        }
+        // The one request the DM3's module refused. What it asks is unknown.
+        OP_2320 => Reply::new(request, STATUS_REFUSED).finish(),
         OP_2032 => {
             // As captured, with the transmit channel count in the third word.
             let mut reply = Reply::new(request, STATUS_OK);
@@ -405,11 +493,23 @@ const PROPERTY_LIST: &str = "002080200001802100030022000300230003002400018060000
 ///
 /// Request body: `0000 | count | ids`. Reply body: `count count`, an
 /// `id value` entry per property, then the out-of-line values in order.
+///
+/// A request with no list at all (Dante Controller's first read) asks for
+/// everything, in the order of the property list.
 fn property_get(request: &[u8], state: &ArcState) -> Option<Vec<u8>> {
-    let count = u16_at(request, REQUEST_BODY + 2)? as usize;
+    let count = u16_at(request, REQUEST_BODY + 2).unwrap_or(0) as usize;
+    if count == 0 {
+        return Some(property_reply(request, &listed_properties(), state));
+    }
     let ids: Vec<u16> =
         (0..count).map(|i| u16_at(request, REQUEST_BODY + 4 + i * 2)).collect::<Option<_>>()?;
     Some(property_reply(request, &ids, state))
+}
+
+/// The ids in [`PROPERTY_LIST`], in its order: a count, then `id type` pairs.
+fn listed_properties() -> Vec<u16> {
+    let list = hex(PROPERTY_LIST);
+    list[2..].as_chunks::<4>().0.iter().map(|entry| u16::from_be_bytes([entry[0], entry[1]])).collect()
 }
 
 fn property_reply(request: &[u8], ids: &[u16], state: &ArcState) -> Vec<u8> {
@@ -425,14 +525,13 @@ fn property_reply(request: &[u8], ids: &[u16], state: &ArcState) -> Vec<u8> {
                 reply.put(blob);
                 at
             }
-            // A property this device was never seen to have. A zero of the
-            // right shape keeps the reply well formed.
-            None if id & 0x8000 != 0 => {
-                let at = reply.here();
-                reply.zeros(4);
-                at
+            // A property the device does not have. The DM3's module was
+            // asked for five such, and answered each with a zero where the
+            // id goes and the id where the value goes.
+            None => {
+                reply.set_u16(entries + i * 4 + 2, id);
+                continue;
             }
-            None => 0,
         };
         reply.set_u16(entries + i * 4, id);
         reply.set_u16(entries + i * 4 + 2, value);
@@ -494,6 +593,151 @@ fn tx_channels(request: &[u8], persona: &Persona, state: &ArcState) -> Option<Ve
         reply.set_u16(at + 2, 0x0107); // as captured
         reply.set_u16(at + 4, format);
         reply.set_u16(at + 6, name);
+    }
+    Some(reply.finish())
+}
+
+/// The channels a second-generation listing covers: the page, how many slots
+/// the reply announces, and whether more follow.
+fn v2_page(start: u16, asked: u16, total: u16) -> (Vec<u16>, u8, u16) {
+    let start = start.max(1);
+    let slots = if asked == 0 { V2_PAGE } else { asked.min(V2_PAGE) };
+    let last = total.min(start.saturating_add(slots - 1));
+    let status = if last < total { STATUS_MORE } else { STATUS_OK };
+    ((start..=last).collect(), slots as u8, status)
+}
+
+/// `0x2002`: transmit channels, second generation, as a DM3's module
+/// answered Dante Controller.
+///
+/// Request body: `0000 | 0001 | first channel | how many`. Reply body: six
+/// zero bytes, a pointer to the counts and one to block A, `slots | n`, a
+/// pointer per slot, then two shared blocks and, per channel, its name and a
+/// 20-byte record `0a00 | number | name | 0000 | block B | format | 0000 |
+/// 7fff | number | 0000`. The format block follows the first record.
+///
+/// Block A (`0500 1200 1167 ...`) is sent as captured. Block B is `0600
+/// 0010`, the device's latency in nanoseconds (it matched property
+/// `0x8205`), then `0010 0002`, which reads like the `fpp=16,2` of the mDNS
+/// channel records.
+fn tx_channels_v2(request: &[u8], persona: &Persona, state: &ArcState) -> Option<Vec<u8>> {
+    let (channels, slots, status) = v2_page(
+        u16_at(request, REQUEST_BODY + 4)?,
+        u16_at(request, REQUEST_BODY + 6)?,
+        persona.tx_channels,
+    );
+    let mut reply = Reply::new(request, status);
+    reply.zeros(6);
+    let block_pointers = reply.here() as usize;
+    reply.zeros(4);
+    let counts = reply.here();
+    reply.put(&[slots, channels.len() as u8]);
+    let pointers = reply.here() as usize;
+    reply.zeros(slots as usize * 2);
+    reply.align4();
+    let block_a = reply.here();
+    reply.put(&hex("0500 1200 1167 0000 0000 0000"));
+    let block_b = reply.here();
+    let mut latency = state.blob(0x8205).to_vec();
+    latency.resize(4, 0);
+    reply.put(&hex("0600 0010")).put(&latency).put(&hex("0010 0002"));
+    reply.set_u16(block_pointers, counts);
+    reply.set_u16(block_pointers + 2, block_a);
+
+    let mut format: Option<u16> = None;
+    for (i, &channel) in channels.iter().enumerate() {
+        let name = reply.string(&persona.tx_channel_name(channel));
+        reply.align4();
+        let record = reply.here();
+        // The first record points forward at the format block behind it.
+        let format_at = format.unwrap_or(record + 20);
+        reply
+            .put_u16(0x0a00)
+            .put_u16(channel)
+            .put_u16(name)
+            .put_u16(0)
+            .put_u16(block_b)
+            .put_u16(format_at)
+            .put_u16(0)
+            .put_u16(0x7fff)
+            .put_u16(channel)
+            .put_u16(0);
+        if format.is_none() {
+            format = Some(reply.here());
+            reply.put(&format_block(persona, state.encoding_bits));
+        }
+        reply.set_u16(pointers + i * 2, record);
+    }
+    Some(reply.finish())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Direction {
+    Tx,
+    Rx,
+}
+
+/// `0x2400` (transmit) and `0x3400` (receive): the full channel listings
+/// Dante Controller reads, as a DM3's module answered them.
+///
+/// Request body: `0000`, eight zero bytes, `0001 | first channel | 0001 |
+/// how many`, more zeros. (The three ones were all `0001` in every request
+/// captured, so which of them is the first channel is a reading, not a
+/// certainty.) Reply body: six zero bytes, `slots | n`, a pointer per slot,
+/// the format block, then per channel its name and a record of twenty words:
+///
+/// ```text
+/// 1414 | number | 0000 | 0003 | number | 0000 | 0000 | 0107 | 0000 | 0000 |
+/// name | format | 0000 | 0000 | 0000 | name | 0000 | 0000 | 0000 | 0000
+/// ```
+///
+/// A receive record opens `141c`, has `000e` where a transmit one has
+/// `0107` (the same two words the first-generation records carry), and adds
+/// eight more words for its subscription: `0608`, five zeros, `0202`, zero.
+/// That is the only form captured, a channel subscribed to nothing, so it
+/// is the only form sent: **a subscription a controller sets shows in the
+/// first-generation listing (`0x3000`) and not in this one.**
+fn channels_full(
+    request: &[u8],
+    persona: &Persona,
+    state: &ArcState,
+    direction: Direction,
+) -> Option<Vec<u8>> {
+    let total = match direction {
+        Direction::Tx => persona.tx_channels,
+        Direction::Rx => persona.rx_channels,
+    };
+    let (channels, slots, status) = v2_page(
+        u16_at(request, REQUEST_BODY + 12)?,
+        u16_at(request, REQUEST_BODY + 16)?,
+        total,
+    );
+    let mut reply = Reply::new(request, status);
+    reply.zeros(6).put(&[slots, channels.len() as u8]);
+    let pointers = reply.here() as usize;
+    reply.zeros(slots as usize * 2);
+    reply.align4();
+    let format = reply.here();
+    reply.put(&format_block(persona, state.encoding_bits));
+
+    for (i, &channel) in channels.iter().enumerate() {
+        let name = match direction {
+            Direction::Tx => persona.tx_channel_name(channel),
+            Direction::Rx => persona.rx_channel_name(channel),
+        };
+        let name = reply.string(&name);
+        reply.align4();
+        reply.set_u16(pointers + i * 2, reply.here());
+        let (opening, kind) = match direction {
+            Direction::Tx => (0x1414, 0x0107),
+            Direction::Rx => (0x141c, 0x000e),
+        };
+        reply.put_u16(opening).put_u16(channel).put_u16(0).put_u16(3).put_u16(channel);
+        reply.put_u16(0).put_u16(0).put_u16(kind).put_u16(0).put_u16(0);
+        reply.put_u16(name).put_u16(format).zeros(6).put_u16(name).zeros(8);
+        if direction == Direction::Rx {
+            reply.put(&hex("0608 0000 0000 0000 0000 0000 0202 0000"));
+        }
     }
     Some(reply.finish())
 }
@@ -773,6 +1017,130 @@ mod tests {
 
         assert_eq!(ask("28010010004330140000000100000001", &mut state), hex("2801000a004330140001"));
         assert_eq!(state.subscription(1), None);
+    }
+
+    // --- Dante Controller's questions. The requests and replies below are
+    // Dante Controller 4 asking a DM3's Dante module (16 in, 16 out, 96 kHz,
+    // latency 0.5 ms), from `yamaha-dm3/dm3-dante-cmc-arc.pcapng`. The
+    // replies carry channel names and nothing that identifies the device.
+
+    /// A device shaped like the DM3's module, for comparing layouts.
+    fn dm3_shaped() -> (DeviceIdentity, Persona, ArcState) {
+        let (identity, rio) = rio();
+        let persona = Persona { tx_channels: 16, rx_channels: 16, sample_rate: 96_000, ..rio };
+        let mut state = ArcState::new(&persona);
+        state.restore_property(0x8205, &hex("0007a120"));
+        (identity, persona, state)
+    }
+
+    fn ask_dm3(request: &str) -> Vec<u8> {
+        let (identity, persona, mut state) = dm3_shaped();
+        respond(&hex(request), &identity, &persona, &mut state).expect("a reply")
+    }
+
+    const DM3_2002: &str = "280801e00012200200010000000000000014003810100054007c009400ac00c400dc00f4010c0124013c0154016c0184\
+        019c01b401cc0000050012001167000000000000060000100007a12000100002303100000a0000010050000000440068\
+        00007fff000100000001770001010018040000180018000c303200000a000002007800000044006800007fff00020000\
+        303300000a000003009000000044006800007fff00030000303400000a00000400a800000044006800007fff00040000\
+        303500000a00000500c000000044006800007fff00050000303600000a00000600d800000044006800007fff00060000\
+        303700000a00000700f000000044006800007fff00070000303800000a000008010800000044006800007fff00080000\
+        303900000a000009012000000044006800007fff00090000313000000a00000a013800000044006800007fff000a0000\
+        313100000a00000b015000000044006800007fff000b0000313200000a00000c016800000044006800007fff000c0000\
+        313300000a00000d018000000044006800007fff000d0000313400000a00000e019800000044006800007fff000e0000\
+        313500000a00000f01b000000044006800007fff000f0000313600000a00001001c800000044006800007fff00100000";
+
+    /// The first channel and a half of the 772-byte transmit listing; the
+    /// other fifteen records repeat the pattern.
+    const DM3_2400_HEAD: &str = "2808030400032400000100000000000010100048007400a000cc00f801240150017c01a801d40200022c0258028402b0\
+        02dc00000001770001010018040000180018000c30310000141400010000000300010000000001070000000000440034\
+        0000000000000044000000000000000030320000141400020000000300020000000001070000000000700034";
+
+    /// The first channel and a half of the 1028-byte receive listing.
+    const DM3_3400_HEAD: &str = "2808040400143400000100000000000010100048008400c000fc0138017401b001ec0228026402a002dc031803540390\
+        03cc00000001770001010018040000180018000c30310000141c000100000003000100000000000e0000000000440034\
+        000000000000004400000000000000000608000000000000000000000202000030320000141c00020000000300020000";
+
+    #[test]
+    fn second_generation_transmit_channels_are_the_modules_answer() {
+        assert_eq!(ask_dm3("28080010001220020000000100010010"), hex(DM3_2002));
+    }
+
+    #[test]
+    fn the_full_channel_listings_are_laid_out_as_the_module_laid_them_out() {
+        let tx = ask_dm3("28080022000324000000000000000000000100010001000000000000000000000000");
+        assert_eq!(tx.len(), 772);
+        assert_eq!(&tx[..hex(DM3_2400_HEAD).len()], &hex(DM3_2400_HEAD)[..]);
+        // The last record: channel 16, its name four bytes before it.
+        assert_eq!(&tx[0x2d8..0x2e0], &hex("3136000014140010")[..]);
+
+        let rx = ask_dm3("28080022001434000000000000000000000100010001001000000000000000000000");
+        assert_eq!(rx.len(), 1028);
+        assert_eq!(&rx[..hex(DM3_3400_HEAD).len()], &hex(DM3_3400_HEAD)[..]);
+        assert_eq!(&rx[rx.len() - 16..], &hex("06080000000000000000000002020000")[..]);
+    }
+
+    #[test]
+    fn the_small_second_generation_answers_are_the_modules() {
+        // Empty flow lists, both directions.
+        let empty = format!("0000000000001000{}", "00".repeat(32));
+        assert_eq!(
+            ask_dm3("28080022001026000000000000000000000100010001001000000000000000000000"),
+            hex(&format!("28080032001026000001{empty}"))
+        );
+        assert_eq!(
+            ask_dm3("28080022001636000000000000000000000100010001001000000000000000000000"),
+            hex(&format!("28080032001636000001{empty}"))
+        );
+        // 0x2204: answered in the older version, as the module answered it.
+        assert_eq!(ask_dm3("28080010000822040000000100010000"), hex("2801001400082204000104000000000000000000"));
+        // 0x2320: refused, with no body.
+        assert_eq!(ask_dm3("2808000a000c23200000"), hex("2808000a000c23200030"));
+        // Labels: sixteen empty slots when sixteen are asked for.
+        let labels = ask_dm3("28080010000620100000000100010010");
+        assert_eq!(labels.len(), 140);
+        assert_eq!(&labels[..12], &hex("2808008c0006201000011000")[..]);
+        // 0x2032 carries the transmit channel count.
+        assert_eq!(ask_dm3("28080010000420320000000100010000"), hex("280800120004203200010001000100107fff"));
+    }
+
+    #[test]
+    fn a_32_channel_device_pages_the_second_generation_listings() {
+        let (identity, persona) = rio();
+        let mut state = ArcState::new(&persona);
+        let first =
+            respond(&hex("28080010001220020000000100010010"), &identity, &persona, &mut state).unwrap();
+        assert_eq!(u16_at(&first, 8), Some(STATUS_MORE), "32 inputs, 16 to a page");
+        assert_eq!(&first[0x14..0x16], &[16, 16]);
+        let second =
+            respond(&hex("28080010001220020000000100110010"), &identity, &persona, &mut state).unwrap();
+        assert_eq!(u16_at(&second, 8), Some(STATUS_OK));
+        let record = u16_at(&second, 0x16).unwrap() as usize;
+        assert_eq!(u16_at(&second, record + 2), Some(17), "the second page starts at channel 17");
+        // The Rio's own latency, not the DM3's, in block B.
+        assert_eq!(&second[0x48..0x4c], &hex("000f4240")[..]);
+
+        // The receive listing stops at the Rio's 24 outputs.
+        let mut request = hex("28080022001434000000000000000000000100010001001000000000000000000000");
+        request[20..22].copy_from_slice(&17u16.to_be_bytes());
+        let rx = respond(&request, &identity, &persona, &mut state).unwrap();
+        assert_eq!(u16_at(&rx, 8), Some(STATUS_OK));
+        assert_eq!(&rx[0x10..0x12], &[16, 8]);
+    }
+
+    #[test]
+    fn a_read_with_no_list_returns_every_property_and_an_unknown_id_is_marked() {
+        let (identity, persona) = rio();
+        let mut state = ArcState::new(&persona);
+        let all = respond(&hex("2808000a001811000000"), &identity, &persona, &mut state).unwrap();
+        assert_eq!(&all[10..12], &[32, 32], "the 32 ids of the property list");
+        assert_eq!(&all[12..14], &hex("8020")[..], "in the list's order");
+        let rate = u16_at(&all, 14).unwrap() as usize;
+        assert_eq!(&all[rate..rate + 4], &48_000u32.to_be_bytes(), "0x8020 is the sample rate");
+
+        // Frame 73 of the DM3 capture asked for five ids the module did not
+        // have; each came back as a zero id with the asked id as its value.
+        let reply = respond(&hex("2808000e000a110000000002821800640000"), &identity, &persona, &mut state);
+        assert_eq!(reply.unwrap()[10..], hex("0202 0000 8218 0000 0064")[..]);
     }
 
     #[test]

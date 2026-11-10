@@ -93,7 +93,7 @@ Two layers, kept apart in the code as they are on the network.
 | | Port | What it does |
 |---|---|---|
 | mDNS | 5353 | Advertises `_netaudio-arc`, `_netaudio-cmc` (both also under the `Yamaha._sub` subtype), `_netaudio-dbc`, and one `_netaudio-chan` record per input, with a Rio's TXT records. |
-| ARC | UDP 4440 | Answers a controller's questions: device name, channel counts and names, properties, what each output is subscribed to. Stores a subscription or a property a controller sets and reads it back. |
+| ARC | UDP 4440 | Answers a controller's questions: device name, channel counts and names, properties, what each output is subscribed to. Stores a subscription or a property a controller sets and reads it back. Answers both the console's generation of questions and Dante Controller's (§4). |
 | ConMon registration | UDP 8800 | Tells a controller where the control port is, and takes its request to be sent the status channel. |
 | ConMon status | UDP 8700 in, 224.0.0.231:8702 out | Publishes clock, versions, sample rate, encoding, interface and make-and-model status when asked, at start-up, and every few seconds. Follows a controller's change of sample encoding (the QL1 moves a Rio from 24 to 32 bit). |
 | ConMon heartbeat | 224.0.0.233:8708 | Once a second. |
@@ -143,6 +143,50 @@ cargo run -p dante-babelbox-emulation --example replay_capture -- <capture>
 The replay starts the emulator in the state the captured Rio was in: the
 +48 V it held from its last session, and the 24 output subscriptions it
 already had. Everything else comes out of the emulator's own defaults.
+
+### Dante Controller's questions
+
+Dante Controller does not ask what a console asks. It speaks a later ARC
+version (`0x2808`) and reads channels through a second generation of
+listings (`0x2002`, `0x2400`, `0x3400`, with `0x2600` / `0x3600` for flows)
+that the QL1 never used. The only capture of those is Dante Controller with
+a **DM3's** Dante module (`yamaha-dm3/dm3-dante-cmc-arc.pcapng`), so that is
+what the emulator's answers to them are built from: the module's layouts,
+filled with the persona's channels.
+
+Shaped like that module (16 in, 16 out, 96 kHz), the emulator's answers
+compare with the module's like this:
+
+```bash
+cargo run -p dante-babelbox-emulation --example replay_capture -- <dm3-dante-cmc-arc.pcapng> \
+    --device 169.254.237.144 --name Y001-Yamaha-DM3-a436af --mac ac:44:f2:a4:36:af \
+    --tx 16 --rx 16 --rate 96000 --property 8205=0007a120 --cold
+```
+
+| | Identical to the DM3's module | |
+|---|---|---|
+| Channel, label and flow listings, the property list (`0x1102`, `0x2002`, `0x2010`, `0x2032`, `0x2204`, `0x2320`, `0x2400`, `0x2600`, `0x3300`, `0x3400`, `0x3600`) | **15 of 15** | Every one, byte for byte. |
+| Channel counts, device info, property values (`0x1000`, `0x1003`, `0x1100`) | 0 of 6 | Not meant to match: these describe the module itself, and a DM3's is a Broadway where a Rio's is a Brooklyn 3. The emulator gives the Rio's. |
+
+This is a weaker footing than the console's side, and worth being exact
+about:
+
+- The layouts are right for one real module. **Nobody has captured Dante
+  Controller asking a Rio**, so whether a Rio answers these questions the
+  same way, or refuses them and is asked the older ones instead, is unknown.
+  The emulator answers both generations, so either should work.
+- A receive channel's subscription only has a captured form for "subscribed
+  to nothing". A subscription a controller sets therefore shows in the
+  first-generation listing and not in the second.
+- Half the Rio's property list was never read by the console. Dante
+  Controller reads all of it, so the gaps are filled with the DM3 module's
+  values. Where both devices were asked the same property they agreed on all
+  but one.
+- Two of Dante Controller's ConMon queries (`0x0075`, `0x0077`) go
+  unanswered: only the DM3's module was seen to answer them. A third,
+  `0x0015`, is answered with the Rio's own start-up status.
+- And none of it has been tried: see "Tried" in §5 for why that needs a
+  second machine.
 
 What that does and does not show:
 
@@ -220,12 +264,11 @@ far as a test:
   (`feth`), so this ran on a physical port.
 
 So a Dante Controller test needs the virtual Rio on a **different machine**
-on the same subnet. It will not get far there either, yet: Dante Controller
-speaks ARC version `0x2808` and asks for `0x2002`, `0x2320`, `0x2400`,
-`0x2600`, `0x3400` and `0x3600`, none of which the QL1 asked the Rio, so
-none is answered. `yamaha-dm3/dm3-dante-cmc-arc.pcapng` in `dante-captures`
-has a real Dante module's answers to all of them, which is where support for
-Dante Controller would start.
+on the same subnet. When this was tried the emulator could not have answered
+Dante Controller's own questions anyway (`0x2002`, `0x2320`, `0x2400`,
+`0x2600`, `0x3400`, `0x3600`). It answers them now, from the DM3 capture
+(§4), so the two-machine test is worth running; it is still the first time
+Dante Controller will have seen those answers.
 
 ## 6. Audio
 

@@ -167,6 +167,10 @@ Rio3224-D2 on the Dante network for a Yamaha console to mount and control. Read
 - **The honest claim is narrow, keep it that way:** "its answers are the real Rio's; no console
   has been put in front of it." Not "works with a QL". The head-amp layer matches on 237 of 237
   messages; the Dante layer matches wherever audio is not involved. It carries no audio.
+- **Dante Controller's side stands on a different device.** It asks for channel listings no
+  console asked a Rio for, and the only capture of them is from a DM3's module. Those replies
+  are that module's layouts with the Rio's content, replayed 15 of 15 against the DM3 capture.
+  Say so wherever they are described; they are not "the Rio's answers".
 - **It never answers what the Rio did not answer.** An unknown opcode, a read past an array's
   end, a block for another device: silence, plus a log line. A Rio never NAKs.
 - **On pairing a console writes all 32 channels.** Those writes are relayed. Anything that
