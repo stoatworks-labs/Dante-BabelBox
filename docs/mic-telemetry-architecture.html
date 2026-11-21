@@ -413,7 +413,7 @@
 
           <line x1="140" y1="90" x2="760" y2="90" stroke="var(--trace)" stroke-width="2" marker-end="url(#arrow-trace)"/>
           <text x="450" y="78" text-anchor="middle" class="lbl-mono-em">subscribe rx1.{mute,frequency}, m.rx1.*, mates.tx1.battery.*</text>
-          <text x="450" y="102" text-anchor="middle" class="lbl-sm" style="font-style:italic">"#": lifetime 3600s &mdash; get_state's only call for channel 1</text>
+          <text x="450" y="102" text-anchor="middle" class="lbl-sm" style="font-style:italic">"#": lifetime 60, count 1000 &mdash; renewed every 20 s and on a 310</text>
 
           <line x1="760" y1="150" x2="140" y2="150" stroke="var(--trace)" stroke-width="2" marker-end="url(#arrow-trace)"/>
           <text x="450" y="142" text-anchor="middle" class="lbl-mono">initial notification: current values for every subscribed leaf</text>
@@ -428,14 +428,14 @@
           <text x="450" y="296" text-anchor="middle" class="lbl-sm" style="font-style:italic">change notification &mdash; battery ticked down</text>
         </svg>
       </div>
-      <p class="caption">Subscriptions default to a 10-second lifetime; requesting <span class="mono">3600</span> up front avoids a renewal heartbeat for any reasonably-lengthed <span class="mono">watch</span> session.</p>
+      <p class="caption">A subscription ends when its lifetime (default 10 s) or its count of 1000 notifications runs out, and at meter rates the count goes first. The adapter asks for the guide's example values, re-sends every 20 s and at once on a <span class="mono">310</span>, and on drop cancels and sends <span class="mono">/osc/state/close</span>: a receiver serves only eight subscribing clients.</p>
     </div>
 
     <div class="term">
       <div class="term-bar"><div class="term-dot"></div><div class="term-dot"></div><div class="term-dot"></div><span class="term-title">the actual subscribe payload for channel 1</span></div>
       <pre>{
   <span class="c-key">"osc"</span>: { <span class="c-key">"state"</span>: { <span class="c-key">"subscribe"</span>: [{
-    <span class="c-key">"#"</span>: { <span class="c-key">"lifetime"</span>: 3600 },
+    <span class="c-key">"#"</span>: { <span class="c-key">"lifetime"</span>: 60, <span class="c-key">"count"</span>: 1000 },
     <span class="c-key">"rx1"</span>: { <span class="c-key">"mute"</span>: null, <span class="c-key">"frequency"</span>: null },
     <span class="c-key">"m"</span>: { <span class="c-key">"rx1"</span>: { <span class="c-key">"rssi"</span>: null, <span class="c-key">"rsqi"</span>: null, <span class="c-key">"divi"</span>: null, <span class="c-key">"af"</span>: null } },
     <span class="c-key">"mates"</span>: { <span class="c-key">"tx1"</span>: { <span class="c-key">"battery"</span>: { <span class="c-key">"gauge"</span>: null, <span class="c-key">"lifetime"</span>: null } } }

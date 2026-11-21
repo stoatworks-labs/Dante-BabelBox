@@ -77,21 +77,26 @@ value immediately, then keeps pushing updates on change.
 ```
 mic-monitor                                          EW-DX EM
     │──── subscribe rx1.{mute,frequency}, m.rx1.*, ─────►│
-    │      mates.tx1.battery.*  ("#": lifetime 3600s)    │
+    │      mates.tx1.battery.*  ("#": lifetime 60, count 1000)│
     │◄──── initial notification: current values ─────────│  (this alone answers get_state(1) — no separate GET)
     │◄──── {"m":{"rx1":{"rssi":-52.0}}} ───────────────────│  (change notification — RF level moved)
     │◄──── {"mates":{"tx1":{"battery":{"gauge":71}}}} ────│  (change notification — battery ticked down)
 ```
 
-Subscriptions default to a 10-second lifetime; requesting `3600` up front
-avoids a renewal heartbeat for any reasonably-lengthed `watch` session.
+A subscription ends when its lifetime (default 10 s) or its notification
+count (default 1000) runs out, and the receiver says so with a `310` error.
+At meter rates the count goes first, often within a minute or two. So the
+adapter asks for the values in the guide's own examples (lifetime 60, count
+1000), re-sends every subscription every 20 s, and re-sends at once on a
+`310`. When it's dropped it cancels them and sends `/osc/state/close`,
+because a receiver serves only eight subscribing clients.
 
 The actual subscribe payload for channel 1:
 
 ```json
 {
   "osc": { "state": { "subscribe": [{
-    "#": { "lifetime": 3600 },
+    "#": { "lifetime": 60, "count": 1000 },
     "rx1": { "mute": null, "frequency": null },
     "m": { "rx1": { "rssi": null, "rsqi": null, "divi": null, "af": null } },
     "mates": { "tx1": { "battery": { "gauge": null, "lifetime": null } } }

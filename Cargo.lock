@@ -399,6 +399,7 @@ dependencies = [
  "dante-babelbox-mic-core",
  "serde_json",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

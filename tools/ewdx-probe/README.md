@@ -30,9 +30,10 @@ ewdx_probe.py --host IP [--port 45] [--log FILE] [--wait S] [--allow-rf] COMMAND
 ewdx_probe.py diff A.json B.json  offline; ignores meters, battery, warnings unless --all
 ```
 
-`watch adapter` sends exactly the tree `SennheiserAdapter::subscribe_channel` sends, with the
-same `"#": {"lifetime": 3600}`, so the receiver's answer to it is the answer the Rust adapter
-will get.
+`watch adapter` sends exactly the tree the Rust adapter's `subscribe_request()` sends, with the
+same `"#": {"lifetime": 60, "count": 1000}`, so the receiver's answer to it is the answer the
+adapter will get. The adapter also re-sends it every 20 s and whenever a `310` arrives; add
+`--renew 20` to copy the timer.
 
 ## What it won't send
 
@@ -52,8 +53,9 @@ use a different tool on purpose.
 - **Its socket isn't connected.** The adapter's UDP socket is `connect()`ed to `ip:45`, so a
   reply from any other source port is dropped by the OS. The probe sees every reply and
   prints a warning the first time one comes from somewhere unexpected (bench plan, P2).
-- **It cancels its subscriptions on exit.** The adapter never does. The plan's leaked-slot
-  test (P4) uses `--leave` to behave like the adapter.
+- **A `watch` cancels its subscription on exit** unless `--leave` is given. Since 2026-11-21 the
+  adapter does the same when it's dropped, and also sends `/osc/state/close`. `--leave` is
+  there to imitate a client that dies without cleaning up.
 
 ## Rehearse against the fake
 

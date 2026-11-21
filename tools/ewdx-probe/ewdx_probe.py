@@ -482,9 +482,10 @@ def watch_message(a: argparse.Namespace) -> dict:
     opts = {k: getattr(a, k) for k in ("lifetime", "count", "min", "max") if getattr(a, k) is not None}
     ch = a.channel
     if a.preset == "adapter":
-        # Byte-for-byte the tree SennheiserAdapter::subscribe_channel sends,
-        # including its "#" (lifetime 3600 and nothing else) unless overridden.
-        opts = opts or {"lifetime": 3600}
+        # The tree SennheiserAdapter's subscribe_request() sends, including
+        # its "#" (lifetime 60, count 1000) unless overridden. The adapter
+        # also renews it every 20 s and on a 310; pass --renew 20 to match.
+        opts = opts or {"lifetime": 60, "count": 1000}
         body = {f"rx{ch}": {"mute": None, "frequency": None},
                 "m": {f"rx{ch}": {"rssi": None, "rsqi": None, "divi": None, "af": None}},
                 "mates": {f"tx{ch}": {"battery": {"gauge": None, "lifetime": None}}}}

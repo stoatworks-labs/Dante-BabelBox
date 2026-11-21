@@ -445,10 +445,16 @@ No `[[mapping]]` section — nothing to route between mics.
 - **`quality`/`af` always show `n/a` for a Shure mic** — expected; Shure's
   protocol doesn't document those fields the way Sennheiser's does. See
   `mic-adapter-shure`'s module doc comment.
-- **A Sennheiser channel never reports anything** — subscriptions there
-  default to a 1-hour lifetime (requested explicitly in `connect()`); a
-  `watch` session running longer than that would need re-subscription,
-  which isn't implemented yet.
+- **A Sennheiser channel stops updating** — an EW-DX subscription ends when
+  its lifetime or its count of 1000 notifications runs out. The adapter
+  renews every subscription every 20 s and as soon as the receiver reports
+  one ended (`310`). Run with `RUST_LOG=dante_babelbox_mic_adapter_sennheiser=debug`
+  to see the renewals. If one field freezes while others move, that's
+  worth a bug report: it hasn't been checked against a real receiver yet.
+- **A Sennheiser receiver refuses `watch` after several restarts** — it
+  allows eight subscribing clients, and each run is a new one. A run that
+  ends with Ctrl-C hands its slot back; a killed one holds it until its
+  60-second lifetime runs out.
 - **`watch` connects but nothing ever prints** — confirm the configured
   `address`/`port` actually matches the device's control port (2202 for
   Shure, 45 for Sennheiser unless changed), and that nothing else already

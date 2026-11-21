@@ -76,14 +76,20 @@ Everything gets put back, but plan as if the audio could jump.
 These come from reading `crates/mic-adapter-sennheiser/src/sennheiser.rs` against the guide.
 They are predictions, not findings. Each one names the step that settles it.
 
+P1, P3 and P4 were fixed in the adapter on 2026-11-21, from the guide alone, so for those three
+the session checks the fix rather than looking for the bug. The same change stopped the
+adapter's receive loop giving up for good on the first read error (a connected UDP socket
+reports an ICMP port-unreachable as one, which is what a rebooting receiver would cause). P2
+and P5–P7 still stand as written.
+
 | # | Prediction | Why | Settled by |
 |---|---|---|---|
-| P1 | **`mic-monitor` stops updating after about 1000 notifications, and may not look like it.** | The guide's subscription defaults are `count` 1000 and `lifetime` 10 s. The adapter asks for a `lifetime` of 3600 and no `count`, and never renews. At meter rates, 1000 notifications could be gone in a minute or two. If the count runs per address, the fast meters freeze first while slower fields keep the screen moving: in the rehearsal against the fake (which counts per address, a guess), `af` and `rf` froze after about 50 s and `quality` carried on. | 4.6, 7.2 |
+| P1 | **Fixed, to confirm: `mic-monitor` stopped updating after about 1000 notifications, and might not look like it.** | The guide's subscription defaults are `count` 1000 and `lifetime` 10 s. The adapter used to ask for a `lifetime` of 3600 and no `count`, and never renewed. In the rehearsal against the fake (which counts per address, a guess), `af` and `rf` froze after about 50 s and `quality` carried on. It now asks for the guide's own example values (`lifetime` 60, `count` 1000), re-sends every subscription every 20 s, and re-sends at once on any `310`. To confirm: no field ever freezes, and how often `310`s arrive between renewals. | 4.6, 7.2 |
 | P2 | **`mic-monitor` shows nothing if replies come from a port other than 45.** | The adapter `connect()`s its UDP socket to `ip:45`, so the OS drops a datagram from any other source port. The probe uses an unconnected socket and warns when this happens. | 1.2 |
-| P3 | **The battery reading goes stale when the transmitter goes away.** | The guide says the `mates` paths answer **424** while the transmitter is absent. The adapter only clears battery on an empty `battery` object, and it ignores `/osc/error`, so the last percentage stays on screen. | 6.4 |
-| P4 | **Restarting `mic-monitor` uses up the receiver's client slots.** | The guide allows eight subscribing clients. Every run binds a new port, asks for an hour, and never cancels or closes. The ninth restart within the hour may be refused, and so may Sennheiser's own software. | 4.5, 7.3 |
+| P3 | **Fixed, to confirm: the battery reading went stale when the transmitter went away.** | The guide says the `mates` paths answer **424** while the transmitter is absent. The adapter only cleared battery on an empty `battery` object and ignored `/osc/error`. It now clears the reading for any `mates.txN.battery` address it finds inside an `/osc/error`, whether that's a bare address tree or nested under other keys. The guide doesn't print the error's shape, so the real 424 might still slip past. | 6.4 |
+| P4 | **Fixed, to confirm: restarting `mic-monitor` used up the receiver's client slots.** | The guide allows eight subscribing clients. Every run bound a new port, asked for an hour and never cancelled or closed. Now dropping the adapter (Ctrl-C) cancels each subscription and sends `/osc/state/close`, and the 60 s lifetime means a run that is killed outright frees its slot within a minute. To confirm: nine clean restarts in a row are never refused, and after a `kill -9` the slot comes back within a minute. | 4.5, 7.3 |
 | P5 | **Nothing subscribes at all, if the receiver wants a different form.** | The guide's prose says the argument is an *array* of address trees. Every example it prints is invalid JSON (`"subscribe":{["#":…`). The adapter sends the array form. | 1.4, 3.1 |
-| P6 | **The lifetime gets adapted down.** | The guide lets the server adapt subscription parameters and send back the adapted values. If 3600 becomes, say, 60, P1 arrives sooner. | 4.1 |
+| P6 | **The lifetime gets adapted down.** | The guide lets the server adapt subscription parameters and send back the adapted values. The adapter renews every 20 s, so a 60 s lifetime adapted below 20 s would lapse between renewals; the adapter still catches the `310`, but each one is a gap. | 4.1 |
 | P7 | **EM 2: the rx3/rx4 priming gets 404s.** | `watch` primes channels 1–4 on every receiver. It's probably harmless: `watch` logs the failure at debug level and moves on after about a second per channel. It should still be seen once. | 7.1 |
 
 Not a prediction, but something the session should record: `MicState` has nowhere to put
@@ -228,27 +234,31 @@ have to parse.**
 probe watch adapter --channel 1 --duration 20
 ```
 
-Record the acknowledgement, and **whether `lifetime: 3600` comes back as 3600**. Record how the
-initial values arrive (one datagram or several), and the notification rate for each path in
-the summary.
+Record the acknowledgement, and **whether `lifetime: 60, count: 1000` come back unchanged**.
+Record how the initial values arrive (one datagram or several), and the notification rate for
+each path in the summary. The adapter re-sends this same request every 20 s, so also run it
+with `--renew 20 --duration 70` and check the re-sends are acknowledged the same way and
+nothing arrives twice.
 
 **4.2 What `min` and `max` do.** The guide's prose contradicts itself, so measure it. Keep the
-steady source running and use 20 s each:
+steady source running and use 20 s each. Each asks for a 30 s lifetime, because the guide's
+default of 10 s would end it halfway; any watch longer than that needs `--lifetime` and, past
+the lifetime, `--renew`:
 
 ```bash
-probe watch meters --duration 20 --quiet
+probe watch meters --duration 20 --lifetime 30 --quiet
 ```
 
 ```bash
-probe watch meters --duration 20 --quiet --max 500
+probe watch meters --duration 20 --lifetime 30 --quiet --max 500
 ```
 
 ```bash
-probe watch meters --duration 20 --quiet --min 1000
+probe watch meters --duration 20 --lifetime 30 --quiet --min 1000
 ```
 
 ```bash
-probe watch meters --duration 20 --quiet --min 200 --max 200
+probe watch meters --duration 20 --lifetime 30 --quiet --min 200 --max 200
 ```
 
 Record the rates. Then repeat the first one with the transmitter **muted at the source**, so
@@ -294,15 +304,20 @@ probe clients --n 9 --lifetime 60 --close
 probe clients --n 9 --lifetime 60 --close
 ```
 
-**4.6 How long a default subscription lives (P1).** Start this last, in a **second terminal**, and
-let it run through Phases 5 and 6. Define `probe` there too.
+**4.6 How fast the count runs out (P1).** The adapter renews every 20 s, which keeps a
+subscription alive only if its 1000 notifications last longer than that. Measure it with a
+lifetime long enough that only the count can end it. Start this last, in a **second terminal**,
+and let it run through Phases 5 and 6. Define `probe` there too.
 
 ```bash
-probe watch adapter --channel 1 --duration 1800 --quiet
+probe watch adapter --channel 1 --lifetime 3600 --duration 1800 --quiet
 ```
 
-Record when, and after how many datagrams, the 310 arrives. The tool prints both. Then try
-the same with `--count 100000`, to see whether a larger count is accepted or adapted.
+Record when, and after how many datagrams, the 310 arrives. The tool prints both. If it's
+under 20 s, the adapter will be renewing on each 310 rather than ahead of it, with a short gap
+each time; 7.2 shows whether that gap is visible. Then try the same with `--count 100000`, to
+see whether a larger count is accepted or adapted. If it's accepted, a bigger count is the
+cheaper fix.
 
 ## Phase 5: control (writes, all restored, ~45 min)
 
@@ -312,7 +327,7 @@ made by one client (the probe's writes below) is pushed to another.** A bidirect
 depends on that:
 
 ```bash
-probe watch status --channel 1 --duration 3600
+probe watch status --channel 1 --duration 3600 --lifetime 60 --renew 20
 ```
 
 **5.1 Identify.** Blink the receiver, then channel 1, and check the front panel:
@@ -438,7 +453,7 @@ Start `mic-monitor` now (step 7.1), so it sees everything below. Keep the status
 running and add a meters watch. Narrate each action with the time:
 
 ```bash
-probe watch meters --channel 1 --duration 3600 --max 250
+probe watch meters --channel 1 --duration 3600 --max 250 --lifetime 60 --renew 20
 ```
 
 **6.1 Audio level.** Speak, shout and stay silent. With the steady source, compare `/m/rx1/af`
@@ -454,8 +469,11 @@ then the other, and watch `divi` (0 none, 1 A, 2 B).
 
 **6.4 Transmitter off (P3).** Switch the transmitter off and watch every terminal. Record what
 the status watch receives: a 424 (in what shape), `NoLink`, the meters' floor values. Also
-record **what `mic-monitor` shows**: does the battery percentage stay on screen? Switch the
-transmitter back on and check the subscription carries on by itself.
+record **what `mic-monitor` shows**: battery and runtime should go to `n/a`. If they stay on
+screen, find in the probe log what the receiver sent instead. A 424 the adapter missed means
+its shape is different from what the adapter looks for. No 424 at all means the adapter needs
+another cue, such as `NoLink` in the warnings. Switch the transmitter back on and check the
+subscription carries on by itself and the battery comes back.
 
 **6.5 Second channel.** Sync the transmitter to channel 2. Check `/rx2/mates` reads
 `["mates/tx2"]` and that the battery shows under `tx2`. The adapter assumes channel N's
@@ -478,24 +496,29 @@ frequency and mute. On an EM 2, look for the `channel not available` or `timed o
 channel` lines for rx3/rx4 (P7), and check the receiver's reply to those subscriptions in the
 pcap.
 
-**7.2 How long it lasts (P1).** Leave it running, with the transmitter moving and the source
-varying. Note when each field stops changing, against 4.6's result. **Watch the `af` and `rf`
-columns, not just whether lines keep coming:** a line still prints whenever any one field
-changes, so a frozen meter can sit inside output that looks live.
+**7.2 How long it lasts (P1).** Leave it running for at least ten minutes, with the
+transmitter moving and the source varying. Nothing should stop changing: check that `af` and
+`rf` still move well past 4.6's time. **Watch the `af` and `rf` columns, not just whether lines
+keep coming:** a line still prints whenever any one field changes, so a frozen meter can sit
+inside output that looks live. Count the `SSC subscription terminated (310); renewing` lines in
+the log against the minutes run. A few means the count runs out between renewals (4.6). None
+means the 20 s timer is keeping ahead.
 
-**7.3 Leaked slots (P4, second half).** This is the last step that subscribes, because it can
-leave the receiver refusing subscriptions for up to an hour. Phases 8 and 9 only read and
-write. First stop every probe `watch` (each cancels its own on exit), so `mic-monitor`'s
-leftovers are the only clients. Then stop and restart `mic-monitor` nine times within a few
-minutes. After each restart, check that the probe can still subscribe:
+**7.3 Client slots (P4, second half).** This is the last step that subscribes, because if the
+fix doesn't hold it can leave the receiver refusing subscriptions for a minute or more. Phases
+8 and 9 only read and write. First stop every probe `watch` (each cancels its own on exit), so
+`mic-monitor` is the only client. Then stop it with Ctrl-C and restart it nine times within a
+few minutes. After each restart, check that the probe can still subscribe:
 
 ```bash
 probe watch paths /device/name --lifetime 5 --duration 2
 ```
 
-Record at which restart it starts failing, if any, and whether Sennheiser's software (if
-connected) loses its updates. To recover, wait out the hour or power-cycle the receiver, and
-note which one was needed.
+None should be refused: each Ctrl-C cancels and closes. Then imitate a crash: start
+`mic-monitor`, `kill -9` it (`pkill -9 mic-monitor`), and run the probe line above every
+10 s. Record how long until the slot came back; the 60 s lifetime says within a minute.
+Record whether Sennheiser's software (if connected) lost its updates at any point, and whether
+anything needed a power cycle.
 
 ## Phase 8: the Dante side (read-only, ~15 min)
 
@@ -556,12 +579,12 @@ Fill this in during the session. The evidence column is a time in the JSONL log 
 | 2.2 | One-datagram limit (413/414/450?) | | |
 | 3.1 | Error reply JSON: 404, 210, 400 | | |
 | 3.1 | Write to a read-only leaf: error or real value? | | |
-| 4.1 | `lifetime` 3600 adapted to? (P6) Rate per meter | | |
+| 4.1 | `lifetime` 60 / `count` 1000 adapted to? (P6) Rate per meter; re-sends clean? | | |
 | 4.2 | Rates for each `min`/`max` setting; does an unchanged value notify? | | |
 | 4.3 | 310 at the lifetime; renewal keeps it alive? | | |
 | 4.4 | Cancel acknowledged? Anything still held afterwards? | | |
 | 4.5 | Client limit, the refusal's JSON, does `close` free a slot? | | |
-| 4.6 | Time and datagram count to 310 with default count (P1); larger count accepted? | | |
+| 4.6 | Time and datagram count to 310 with default count (P1): under 20 s? Larger count accepted? | | |
 | 5.2 | Gain: Dante / analog / both? Rounding of 10, 11, 1.5; clamp; `"12"` | | |
 | 5.2 | `/m/rxN/af` pre- or post-gain? | | |
 | 5.3 | AF-out level: analog only? Rounding | | |
@@ -574,11 +597,11 @@ Fill this in during the session. The evidence column is a time in the JSONL log 
 | 6.1 | `af` against the Dante meter; `AfPeak` threshold | | |
 | 6.2 | `rssi`/`rsqi` range seen; `divi` with each antenna removed; `LowSignal` | | |
 | 6.3 | Battery fields per type | | |
-| 6.4 | Transmitter off: 424 shape, `NoLink`, meter floor; stale battery in `mic-monitor`? (P3) | | |
+| 6.4 | Transmitter off: 424 shape, `NoLink`, meter floor; battery to `n/a` in `mic-monitor`? (P3) | | |
 | 6.5 | Channel 2 ↔ `tx2` | | |
 | 7.1 | `mic-monitor` agrees with the probe? rx3/rx4 on an EM 2 (P7) | | |
-| 7.2 | `mic-monitor` stops updating after (P1) | | |
-| 7.3 | Restart count before a refusal (P4); recovery needed | | |
+| 7.2 | Any field freeze in 10+ min? 310-renewals per minute (P1) | | |
+| 7.3 | Nine Ctrl-C restarts: any refusal? After `kill -9`, slot back in (P4) | | |
 | 8.3 | SSC on the Dante IP? | | |
 | 8.4 | Anything Sennheiser-specific on the Dante control ports? | | |
 | 9.1 | Diff after restore = 0? | | |
@@ -589,8 +612,9 @@ Fill this in during the session. The evidence column is a time in the JSONL log 
   [`sennheiser-ewg3-bench-2026-09-15.md`](sennheiser-ewg3-bench-2026-09-15.md) records the G3.
   The pcap and the probe log go in the private `dante-captures` repo, not this public one.
 - Correct `crates/mic-adapter-sennheiser`: its module comment where the guide was wrong, unit
-  tests rebuilt on real replies as fixtures, and fixes for whichever of P1–P7 were confirmed
-  (renewal or re-subscription, a `count`, parsing 424s and `/osc/error`, cancelling on exit).
+  tests rebuilt on real replies as fixtures, and fixes for whichever of P2 and P5–P7 were
+  confirmed. Where the receiver disagrees with the guide-based fixes for P1, P3 and P4 (the
+  renewal interval, the 424's shape, whether `close` frees a slot), correct those too.
 - With 5.2–5.5 answered, decide what a `sennheiser-ewdx` preamp kind's "gain" is. The
   rounding rule matters: the router's echo check treats values within 0.001 dB as equal, so a
   receiver that answers 9 when asked for 10 looks like a new value and could bounce back
